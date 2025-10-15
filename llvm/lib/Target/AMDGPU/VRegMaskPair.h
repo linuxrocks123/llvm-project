@@ -1,5 +1,5 @@
 //===------- VRegMaskPair.h ----------------------------------------*-
-// C++-*-===//
+//C++-*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 ///
-/// ile
-/// rief Defines VRegMaskPair and VRegMaskPairSet for managing sets of
+/// \file
+/// \brief Defines VRegMaskPair and VRegMaskPairSet for managing sets of
 /// virtual registers and their lane masks.
 ///
 /// Set operations (union, intersection, subtraction) are implemented based on
@@ -21,13 +21,18 @@
 #ifndef LLVM_LIB_TARGET_VREGMASKPAIR_H
 #define LLVM_LIB_TARGET_VREGMASKPAIR_H
 
+#include "SIRegisterInfo.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Register.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/MC/LaneBitmask.h"
-#include "llvm/Support/Compiler.h"
+#include "llvm/Support/Debug.h"
 #include <cassert>
+#include <set>
+
+using namespace llvm;
 
 class VRegMaskPairSet;
 
@@ -82,8 +87,8 @@ public:
     return TRI->getNumCoveredRegs(LaneMask);
   }
 
-  bool operator==(const VRegMaskPair &other) const {
-    return VReg == other.VReg && LaneMask == other.LaneMask;
+  bool operator==(const VRegMaskPair &Other) const {
+    return VReg == Other.VReg && LaneMask == Other.LaneMask;
   }
 };
 
@@ -95,7 +100,8 @@ class LaneCoverageResult {
 
 public:
   LaneCoverageResult() = default;
-  LaneCoverageResult(const LaneBitmask Mask) : Data(Mask), NotCovered(Mask){};
+  LaneCoverageResult(const LaneBitmask Mask)
+      : Data(Mask), NotCovered(Mask){};
   bool isFullyCovered() { return Data == Covered; }
   bool isFullyUncovered() { return Data == NotCovered; }
   LaneBitmask getCovered() { return Covered; }
@@ -112,6 +118,7 @@ class VRegMaskPairSet {
   LinearStorageT LinearStorage;
 
 public:
+
   VRegMaskPairSet() = default;
 
   template <typename ContainerT,
@@ -188,7 +195,7 @@ public:
 
   bool contains(const VRegMaskPair &VMP) const {
     auto It = SetStorage.find(VMP.VReg);
-    return It != SetStorage.end() && It->second.find(VMP.LaneMask) != It->second.end();
+    return It != SetStorage.end() && It->second.count(VMP.LaneMask) > 0;
   }
 
   void clear() {
@@ -199,8 +206,9 @@ public:
   size_t size() const { return LinearStorage.size(); }
   bool empty() const { return LinearStorage.empty(); }
 
-  void sort(llvm::function_ref<bool(const VRegMaskPair &, const VRegMaskPair &)>
-                Cmp) {
+  void
+  sort(llvm::function_ref<bool(const VRegMaskPair &, const VRegMaskPair &)>
+           Cmp) {
     std::sort(LinearStorage.begin(), LinearStorage.end(), Cmp);
   }
 
@@ -383,16 +391,18 @@ template <> struct DenseMapInfo<VRegMaskPair> {
 
   static unsigned getHashValue(const VRegMaskPair &P) {
     return DenseMapInfo<unsigned>::getHashValue(P.getVReg().id()) ^
-           DenseMapInfo<uint64_t>::getHashValue(P.getLaneMask().getAsInteger());
+           DenseMapInfo<uint64_t>::getHashValue(
+               P.getLaneMask().getAsInteger());
   }
 
   static bool isEqual(const VRegMaskPair &LHS, const VRegMaskPair &RHS) {
     return DenseMapInfo<unsigned>::isEqual(LHS.getVReg().id(),
                                            RHS.getVReg().id()) &&
-           DenseMapInfo<uint64_t>::isEqual(LHS.getLaneMask().getAsInteger(),
-                                           RHS.getLaneMask().getAsInteger());
+           DenseMapInfo<uint64_t>::isEqual(
+               LHS.getLaneMask().getAsInteger(),
+               RHS.getLaneMask().getAsInteger());
   }
 };
 
-} // namespace llvm
+}  // namespace llvm
 #endif // LLVM_LIB_TARGET_VREGMASKPAIR_H
