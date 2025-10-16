@@ -1,0 +1,211 @@
+//===--------------- AMDGPUSSARegisterSpiller.h  -------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+///
+/// \file
+/// \brief SSA-aware Register Spiller for AMDGPU
+///
+/// This pass implements register spilling using the MachineLaneSSAUpdater
+/// to maintain SSA form. Based on the approach from:
+/// "Register Spilling and Live-Range Splitting for SSA-Form Programs"
+/// Matthias Braun and Sebastian Hack, CC'09
+///
+//===----------------------------------------------------------------------===//
+
+#ifndef LLVM_LIB_TARGET_AMDGPU_AMDGPUSSAREGISTERSPILLER_H
+#define LLVM_LIB_TARGET_AMDGPU_AMDGPUSSAREGISTERSPILLER_H
+
+#include "AMDGPUNextUseAnalysis.h"
+#include "GCNRegPressure.h"
+#include "SIInstrInfo.h"
+#include "SIMachineFunctionInfo.h"
+#include "SIRegisterInfo.h"
+#include "VRegMaskPair.h"
+#include "llvm/CodeGen/LiveIntervals.h"
+#include "llvm/CodeGen/MachineDominators.h"
+#include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineLaneSSAUpdater.h"
+#include "llvm/CodeGen/MachineLoopInfo.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/Register.h"
+#include "llvm/CodeGen/SlotIndexes.h"
+
+namespace llvm {
+
+/// Helper data structure for grouping together uses where the head of the group
+/// dominates all the other uses in the group. This allows us to emit a single
+/// reload at the head, and all dominated uses in the group can reuse that
+/// value.
+class DomGroup {
+  SmallVector<MachineInstr *> Uses;
+  bool Deleted = false;
+
+public:
+  DomGroup(MachineInstr *MI) { Uses.push_back(MI); }
+  MachineInstr *getHead() const { return Uses.front(); }
+  bool isDeleted() const { return Deleted; }
+  void merge(DomGroup &Other) {
+    for (auto *MI : Other.Uses)
+      Uses.push_back(MI);
+    Other.Deleted = true;
+  }
+  const auto &getUses() const { return Uses; }
+  size_t size() const { return Uses.size(); }
+};
+
+class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
+  const SIRegisterInfo *TRI = nullptr;
+  const SIInstrInfo *TII = nullptr;
+  const MachineLoopInfo *MLI = nullptr;
+  MachineRegisterInfo *MRI = nullptr;
+  const SIMachineFunctionInfo *MFI = nullptr;
+  MachineFrameInfo *FrameInfo = nullptr;
+  LiveIntervals *LIS = nullptr;
+  SlotIndexes *Indexes = nullptr;
+  MachineDominatorTree *DT = nullptr;
+
+  // Next use analysis for spill candidate selection
+  AMDGPUNextUseAnalysis::Result *NU = nullptr;
+
+  // Stack slot management
+  DenseMap<VRegMaskPair, int> Virt2StackSlotMap;
+
+  // TODO: Add tracking for spilled/reloaded registers if needed for
+  // verification
+
+  /// Returns a stack slot for the given VRegMaskPair, creating one if needed.
+  int assignVirt2StackSlot(VRegMaskPair VMP);
+
+  /// Creates a spill slot for the given register class.
+  int createSpillSlot(const TargetRegisterClass *RC);
+
+  /// Calculates the total size of a register set in 32-bit register units.
+  /// This accounts for AMDGPU's 32-bit physical register granularity:
+  /// - VGPR_32: size 1
+  /// - VReg_64: size 2
+  /// - VReg_128: size 4, etc.
+  unsigned getRegSetSizeInRegs(const VRegMaskPairSet &VRegs) const;
+
+  /// Converts RPTracker's LiveRegSet to VRegMaskPairSet.
+  VRegMaskPairSet
+  convertLiveRegs(const GCNRPTracker::LiveRegSet &LiveRegs) const;
+
+  /// Processes the entire function for one register class (SGPR or VGPR).
+  /// This is called twice: first for SGPRs, then for VGPRs.
+  void processFunction(MachineFunction &MF, unsigned RPLimit, bool IsVGPRPass);
+
+  /// Sorts the register set by next-use distance (descending).
+  /// Registers with longer next-use distances are moved to the back.
+  void sortRegSetByNextUse(MachineBasicBlock &MBB,
+                           MachineBasicBlock::reverse_iterator I,
+                           VRegMaskPairSet &Active);
+
+  /// Spill selection algorithm: Selects which VRegMaskPairs to spill based on
+  /// Belady's algorithm to reduce register pressure to the limit.
+  ///
+  /// This implements the core spill selection algorithm:
+  /// 1. Calculate SizeToSpill = CurRP - RPLimit
+  /// 2. Sort Active set by next-use distance (longest last)
+  /// 3. Greedily select registers from the back until we've spilled enough
+  /// 4. For registers larger than needed, split by subregister
+  ///
+  /// NOTE: This method only selects which registers to spill. The actual
+  /// spill instruction emission is done by spillAndReload().
+  ///
+  /// Returns the set of VRegMaskPairs that were selected for spilling.
+  VRegMaskPairSet getVMPsToSpill(MachineBasicBlock &MBB,
+                                 MachineBasicBlock::reverse_iterator I,
+                                 VRegMaskPairSet &Active, unsigned CurRP,
+                                 unsigned RPLimit);
+
+  /// High-level orchestration: Performs atomic spill+reload+SSA repair per
+  /// register to keep MIR valid.
+  ///
+  /// IMPORTANT: Each register is completely spilled+reloaded+repaired before
+  /// moving to the next to avoid invalid MIR state.
+  ///
+  /// Workflow:
+  /// 1. Call getVMPsToSpill() to select and emit spill instructions
+  /// 2. For each spilled VRegMaskPair, call emitReloadsAndRepairSSA()
+  /// 3. MachineLaneSSAUpdater handles LiveInterval updates during SSA repair
+  /// 4. Reset RPTracker after modifications
+  ///
+  /// Returns true if any spilling was performed.
+  bool spillAndReload(MachineBasicBlock &MBB,
+                      MachineBasicBlock::reverse_iterator I,
+                      VRegMaskPairSet &Active, unsigned CurRP,
+                      unsigned RPLimit);
+
+  /// Emits a spill instruction before the given position (forward iterator).
+  /// This is the primary spill method used during SSA repair.
+  void spillBefore(MachineBasicBlock &MBB,
+                   MachineBasicBlock::iterator InsertBefore, VRegMaskPair VMP);
+
+  /// Emits a spill instruction at the end of a basic block (before terminator).
+  void spillAtEnd(MachineBasicBlock &MBB, VRegMaskPair VMP);
+
+  /// Emits a spill instruction before the given position (reverse iterator).
+  /// This is used during backward traversal in processFunction().
+  void spillBefore(MachineBasicBlock &MBB,
+                   MachineBasicBlock::reverse_iterator I, VRegMaskPair VMP);
+
+  /// Emits a reload instruction before the given position (forward iterator).
+  /// Returns the new virtual register that holds the reloaded value.
+  /// This is the primary reload method used during SSA repair.
+  Register reloadBefore(MachineBasicBlock::iterator InsertBefore,
+                        VRegMaskPair VMP);
+
+  /// Emits a reload instruction at the end of a basic block (before
+  /// terminator). Returns the new virtual register that holds the reloaded
+  /// value.
+  Register reloadAtEnd(MachineBasicBlock &MBB, VRegMaskPair VMP);
+
+  /// Emits reload instructions for dominated uses and repairs SSA.
+  ///
+  /// Workflow:
+  /// 1. Find all uses dominated by the spill instruction
+  /// 2. Group uses by dominance chains (one reload per group)
+  /// 3. Emit reload at each group head
+  /// 4. Call MachineLaneSSAUpdater::repairSSAForNewDef() to:
+  ///    - Handle non-dominated uses
+  ///    - Insert PHIs where needed
+  ///    - Rewrite all uses appropriately
+  ///
+  /// NOTE: We only optimize placement for dominated uses. MachineLaneSSAUpdater
+  /// automatically handles all SSA repair including PHI insertion for reachable
+  /// uses, so we don't need to manually compute IDF or classify uses.
+  void emitReloadsAndRepairSSA(VRegMaskPair SpilledVMP, MachineInstr *SpillMI,
+                               int FrameIndex);
+
+  /// Debug helper: dumps a register set to dbgs().
+  void dumpRegSet(const VRegMaskPairSet &Regs) const;
+
+public:
+  static char ID;
+
+  AMDGPUSSARegisterSpiller() : MachineFunctionPass(ID) {}
+
+  bool runOnMachineFunction(MachineFunction &MF) override;
+
+  StringRef getPassName() const override {
+    return "AMDGPU SSA Register Spiller";
+  }
+
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.addRequired<LiveIntervalsWrapperPass>();
+    AU.addRequired<SlotIndexesWrapperPass>();
+    AU.addRequired<MachineLoopInfoWrapperPass>();
+    AU.addRequired<MachineDominatorTreeWrapperPass>();
+    AU.addRequired<AMDGPUNextUseAnalysisWrapper>();
+    AU.addPreserved<MachineLoopInfoWrapperPass>();
+    MachineFunctionPass::getAnalysisUsage(AU);
+  }
+};
+
+} // end namespace llvm
+
+#endif // LLVM_LIB_TARGET_AMDGPU_AMDGPUSSAREGISTERSPILLER_H
