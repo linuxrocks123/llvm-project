@@ -62,24 +62,16 @@ public:
   // Parameters:
   //   NewDefMI: Instruction with a def operand that currently defines OrigVReg (violating SSA)
   //   OrigVReg: The virtual register being redefined
-  //   NewVReg:  (Optional) Pre-allocated virtual register to use instead of auto-creating one
   //
   // This function will:
   //   1. Find the def operand in NewDefMI that defines OrigVReg
   //   2. Derive the lane mask from the operand's subreg index (if any)
-  //   3. Use NewVReg if provided, or create a new virtual register with appropriate class
-  //   4. Replace the operand in NewDefMI to define the new vreg
+  //   3. Create a new virtual register with same class as OrigVReg
+  //   4. Replace the operand in NewDefMI to define the new vreg (preserving subreg index)
   //   5. Perform SSA repair (insert PHIs, rewrite uses)
   //
-  // When to provide NewVReg:
-  //   - Leave it empty (default) for most cases - automatic class selection works well
-  //   - Provide it when you need precise control over register class selection
-  //   - Common use case: subregister spill/reload where target-specific constraints apply
-  //   - Example: Reloading a 96-bit subregister requires vreg_96 class (not vreg_128)
-  //
-  // Returns: The SSA-repaired virtual register (either NewVReg or auto-created)
-  Register repairSSAForNewDef(MachineInstr &NewDefMI, Register OrigVReg,
-                             Register NewVReg = Register());
+  // Returns: The newly created SSA-repaired virtual register
+  Register repairSSAForNewDef(MachineInstr &NewDefMI, Register OrigVReg);
 
 private:
   // Common SSA repair logic

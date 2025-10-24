@@ -4815,7 +4815,7 @@ void X86InstrInfo::storeRegToStackSlot(
 void X86InstrInfo::loadRegFromStackSlot(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI, Register DestReg,
     int FrameIdx, const TargetRegisterClass *RC, const TargetRegisterInfo *TRI,
-    Register VReg, MachineInstr::MIFlag Flags) const {
+    Register VReg, MachineInstr::MIFlag Flags, unsigned SubRegIdx) const {
   const MachineFunction &MF = *MBB.getParent();
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   assert(MFI.getObjectSize(FrameIdx) >= TRI->getSpillSize(*RC) &&
@@ -4831,6 +4831,9 @@ void X86InstrInfo::loadRegFromStackSlot(
   else
     addFrameReference(BuildMI(MBB, MI, DebugLoc(), get(Opc), DestReg), FrameIdx)
         .setMIFlag(Flags);
+  
+  // Note: SubRegIdx parameter is unused by X86 (for SSA-based register allocators only)
+  (void)SubRegIdx;
 }
 
 bool X86InstrInfo::analyzeCompare(const MachineInstr &MI, Register &SrcReg,

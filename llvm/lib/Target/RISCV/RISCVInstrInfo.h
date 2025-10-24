@@ -114,13 +114,15 @@ public:
       MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, Register SrcReg,
       bool IsKill, int FrameIndex, const TargetRegisterClass *RC,
       const TargetRegisterInfo *TRI, Register VReg,
-      MachineInstr::MIFlag Flags = MachineInstr::NoFlags) const override;
+      MachineInstr::MIFlag Flags = MachineInstr::NoFlags,
+      unsigned SubRegIdx = 0) const override;
 
   void loadRegFromStackSlot(
       MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, Register DstReg,
       int FrameIndex, const TargetRegisterClass *RC,
       const TargetRegisterInfo *TRI, Register VReg,
-      MachineInstr::MIFlag Flags = MachineInstr::NoFlags) const override;
+      MachineInstr::MIFlag Flags = MachineInstr::NoFlags,
+      unsigned SubRegIdx = 0) const override;
 
   using TargetInstrInfo::foldMemoryOperandImpl;
   MachineInstr *foldMemoryOperandImpl(MachineFunction &MF, MachineInstr &MI,

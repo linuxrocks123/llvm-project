@@ -325,7 +325,8 @@ void ARCInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                                         const TargetRegisterClass *RC,
                                         const TargetRegisterInfo *TRI,
                                         Register VReg,
-                                        MachineInstr::MIFlag Flags) const {
+                                        MachineInstr::MIFlag Flags, unsigned SubRegIdx) const {
+  (void)SubRegIdx; // Unused parameter
   DebugLoc DL = MBB.findDebugLoc(I);
   MachineFunction &MF = *MBB.getParent();
   MachineFrameInfo &MFI = MF.getFrameInfo();

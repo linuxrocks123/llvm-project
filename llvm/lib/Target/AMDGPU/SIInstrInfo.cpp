@@ -1864,7 +1864,8 @@ void SIInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                                        const TargetRegisterClass *RC,
                                        const TargetRegisterInfo *TRI,
                                        Register VReg,
-                                       MachineInstr::MIFlag Flags) const {
+                                       MachineInstr::MIFlag Flags,
+                                       unsigned SubRegIdx) const {
   MachineFunction *MF = MBB.getParent();
   SIMachineFunctionInfo *MFI = MF->getInfo<SIMachineFunctionInfo>();
   MachineFrameInfo &FrameInfo = MF->getFrameInfo();
@@ -1894,21 +1895,33 @@ void SIInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
 
     if (RI.spillSGPRToVGPR())
       FrameInfo.setStackID(FrameIndex, TargetStackID::SGPRSpill);
-    BuildMI(MBB, MI, DL, OpDesc, DestReg)
-      .addFrameIndex(FrameIndex) // addr
-      .addMemOperand(MMO)
-      .addReg(MFI->getStackPtrOffsetReg(), RegState::Implicit);
+    
+    // Build with or without subregister
+    auto MIB = BuildMI(MBB, MI, DL, OpDesc);
+    if (SubRegIdx != 0) {
+      MIB.addReg(DestReg, RegState::Define | RegState::Undef, SubRegIdx);
+    } else {
+      MIB.addReg(DestReg, RegState::Define);
+    }
+    MIB.addFrameIndex(FrameIndex) // addr
+       .addMemOperand(MMO)
+       .addReg(MFI->getStackPtrOffsetReg(), RegState::Implicit);
 
     return;
   }
 
   unsigned Opcode = getVectorRegSpillRestoreOpcode(VReg ? VReg : DestReg, RC,
                                                    SpillSize, *MFI);
-  BuildMI(MBB, MI, DL, get(Opcode), DestReg)
-      .addFrameIndex(FrameIndex)           // vaddr
-      .addReg(MFI->getStackPtrOffsetReg()) // scratch_offset
-      .addImm(0)                           // offset
-      .addMemOperand(MMO);
+  auto MIB = BuildMI(MBB, MI, DL, get(Opcode));
+  if (SubRegIdx != 0) {
+    MIB.addReg(DestReg, RegState::Define | RegState::Undef, SubRegIdx);
+  } else {
+    MIB.addReg(DestReg, RegState::Define);
+  }
+  MIB.addFrameIndex(FrameIndex)           // vaddr
+     .addReg(MFI->getStackPtrOffsetReg()) // scratch_offset
+     .addImm(0)                           // offset
+     .addMemOperand(MMO);
 }
 
 void SIInstrInfo::insertNoop(MachineBasicBlock &MBB,

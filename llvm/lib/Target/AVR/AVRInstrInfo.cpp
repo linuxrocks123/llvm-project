@@ -128,7 +128,8 @@ void AVRInstrInfo::storeRegToStackSlot(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI, Register SrcReg,
     bool isKill, int FrameIndex, const TargetRegisterClass *RC,
     const TargetRegisterInfo *TRI, Register VReg,
-    MachineInstr::MIFlag Flags) const {
+    MachineInstr::MIFlag Flags, unsigned SubRegIdx) const {
+  (void)SubRegIdx; // Unused
   MachineFunction &MF = *MBB.getParent();
   AVRMachineFunctionInfo *AFI = MF.getInfo<AVRMachineFunctionInfo>();
 
@@ -163,7 +164,8 @@ void AVRInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                                         const TargetRegisterClass *RC,
                                         const TargetRegisterInfo *TRI,
                                         Register VReg,
-                                        MachineInstr::MIFlag Flags) const {
+                                        MachineInstr::MIFlag Flags, unsigned SubRegIdx) const {
+  (void)SubRegIdx; // Unused parameter
   MachineFunction &MF = *MBB.getParent();
   const MachineFrameInfo &MFI = MF.getFrameInfo();
 

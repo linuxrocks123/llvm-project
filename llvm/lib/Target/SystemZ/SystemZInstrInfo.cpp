@@ -1024,7 +1024,8 @@ void SystemZInstrInfo::storeRegToStackSlot(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, Register SrcReg,
     bool isKill, int FrameIdx, const TargetRegisterClass *RC,
     const TargetRegisterInfo *TRI, Register VReg,
-    MachineInstr::MIFlag Flags) const {
+    MachineInstr::MIFlag Flags, unsigned SubRegIdx) const {
+  (void)SubRegIdx; // Unused
   DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
 
   // Callers may expect a single instruction, so keep 128-bit moves
@@ -1039,7 +1040,8 @@ void SystemZInstrInfo::storeRegToStackSlot(
 void SystemZInstrInfo::loadRegFromStackSlot(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, Register DestReg,
     int FrameIdx, const TargetRegisterClass *RC, const TargetRegisterInfo *TRI,
-    Register VReg, MachineInstr::MIFlag Flags) const {
+    Register VReg, MachineInstr::MIFlag Flags, unsigned SubRegIdx) const {
+  (void)SubRegIdx; // Unused parameter
   DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
 
   // Callers may expect a single instruction, so keep 128-bit moves

@@ -571,7 +571,8 @@ public:
       MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, Register SrcReg,
       bool isKill, int FrameIndex, const TargetRegisterClass *RC,
       const TargetRegisterInfo *TRI, Register VReg,
-      MachineInstr::MIFlag Flags = MachineInstr::NoFlags) const override;
+      MachineInstr::MIFlag Flags = MachineInstr::NoFlags,
+      unsigned SubRegIdx = 0) const override;
 
   // Emits a register spill without updating the register class for vector
   // registers. This ensures that when we spill a vector register the
@@ -586,7 +587,8 @@ public:
       MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
       Register DestReg, int FrameIndex, const TargetRegisterClass *RC,
       const TargetRegisterInfo *TRI, Register VReg,
-      MachineInstr::MIFlag Flags = MachineInstr::NoFlags) const override;
+      MachineInstr::MIFlag Flags = MachineInstr::NoFlags,
+      unsigned SubRegIdx = 0) const override;
 
   // Emits a register reload without updating the register class for vector
   // registers. This ensures that when we reload a vector register the

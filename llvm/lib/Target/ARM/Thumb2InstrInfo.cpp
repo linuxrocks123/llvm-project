@@ -167,7 +167,9 @@ void Thumb2InstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
                                           const TargetRegisterClass *RC,
                                           const TargetRegisterInfo *TRI,
                                           Register VReg,
-                                          MachineInstr::MIFlag Flags) const {
+                                          MachineInstr::MIFlag Flags,
+                                          unsigned SubRegIdx) const {
+  (void)SubRegIdx; // Unused
   DebugLoc DL;
   if (I != MBB.end()) DL = I->getDebugLoc();
 
@@ -210,7 +212,8 @@ void Thumb2InstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
 void Thumb2InstrInfo::loadRegFromStackSlot(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator I, Register DestReg,
     int FI, const TargetRegisterClass *RC, const TargetRegisterInfo *TRI,
-    Register VReg, MachineInstr::MIFlag Flags) const {
+    Register VReg, MachineInstr::MIFlag Flags, unsigned SubRegIdx) const {
+  (void)SubRegIdx; // Unused by Thumb2
   MachineFunction &MF = *MBB.getParent();
   MachineFrameInfo &MFI = MF.getFrameInfo();
   MachineMemOperand *MMO = MF.getMachineMemOperand(

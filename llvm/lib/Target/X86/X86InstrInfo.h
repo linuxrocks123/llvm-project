@@ -478,7 +478,8 @@ public:
       MachineBasicBlock &MBB, MachineBasicBlock::iterator MI, Register DestReg,
       int FrameIndex, const TargetRegisterClass *RC,
       const TargetRegisterInfo *TRI, Register VReg,
-      MachineInstr::MIFlag Flags = MachineInstr::NoFlags) const override;
+      MachineInstr::MIFlag Flags = MachineInstr::NoFlags,
+      unsigned SubRegIdx = 0) const override;
 
   void loadStoreTileReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
                         unsigned Opc, Register Reg, int FrameIdx,

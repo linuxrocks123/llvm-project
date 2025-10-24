@@ -60,14 +60,16 @@ public:
       Register SourceRegister, bool IsKill, int FrameIndex,
       const TargetRegisterClass *RegisterClass,
       const TargetRegisterInfo *RegisterInfo, Register VReg,
-      MachineInstr::MIFlag Flags = MachineInstr::NoFlags) const override;
+      MachineInstr::MIFlag Flags = MachineInstr::NoFlags,
+      unsigned SubRegIdx = 0) const override;
 
   void loadRegFromStackSlot(
       MachineBasicBlock &MBB, MachineBasicBlock::iterator Position,
       Register DestinationRegister, int FrameIndex,
       const TargetRegisterClass *RegisterClass,
       const TargetRegisterInfo *RegisterInfo, Register VReg,
-      MachineInstr::MIFlag Flags = MachineInstr::NoFlags) const override;
+      MachineInstr::MIFlag Flags = MachineInstr::NoFlags,
+      unsigned SubRegIdx = 0) const override;
 
   bool expandPostRAPseudo(MachineInstr &MI) const override;
 

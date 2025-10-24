@@ -185,7 +185,8 @@ public:
       MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, Register SrcReg,
       bool isKill, int FrameIndex, const TargetRegisterClass *RC,
       const TargetRegisterInfo *TRI, Register VReg,
-      MachineInstr::MIFlag Flags = MachineInstr::NoFlags) const override;
+      MachineInstr::MIFlag Flags = MachineInstr::NoFlags,
+      unsigned SubRegIdx = 0) const override;
 
   /// Load the specified register of the given register class from the specified
   /// stack frame index. The load instruction is to be added to the given
@@ -194,7 +195,8 @@ public:
       MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
       Register DestReg, int FrameIndex, const TargetRegisterClass *RC,
       const TargetRegisterInfo *TRI, Register VReg,
-      MachineInstr::MIFlag Flags = MachineInstr::NoFlags) const override;
+      MachineInstr::MIFlag Flags = MachineInstr::NoFlags,
+      unsigned SubRegIdx = 0) const override;
 
   /// This function is called for all pseudo instructions
   /// that remain after register allocation. Many pseudo instructions are

@@ -33,7 +33,8 @@ void MSP430InstrInfo::storeRegToStackSlot(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI, Register SrcReg,
     bool isKill, int FrameIdx, const TargetRegisterClass *RC,
     const TargetRegisterInfo *TRI, Register VReg,
-    MachineInstr::MIFlag Flags) const {
+    MachineInstr::MIFlag Flags, unsigned SubRegIdx) const {
+  (void)SubRegIdx; // Unused
   DebugLoc DL;
   if (MI != MBB.end()) DL = MI->getDebugLoc();
   MachineFunction &MF = *MBB.getParent();
@@ -59,7 +60,8 @@ void MSP430InstrInfo::storeRegToStackSlot(
 void MSP430InstrInfo::loadRegFromStackSlot(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI, Register DestReg,
     int FrameIdx, const TargetRegisterClass *RC, const TargetRegisterInfo *TRI,
-    Register VReg, MachineInstr::MIFlag Flags) const {
+    Register VReg, MachineInstr::MIFlag Flags, unsigned SubRegIdx) const {
+  (void)SubRegIdx; // Unused parameter
   DebugLoc DL;
   if (MI != MBB.end()) DL = MI->getDebugLoc();
   MachineFunction &MF = *MBB.getParent();

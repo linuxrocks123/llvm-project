@@ -50,19 +50,15 @@ using namespace llvm;
 //===----------------------------------------------------------------------===//
 
 Register MachineLaneSSAUpdater::repairSSAForNewDef(MachineInstr &NewDefMI,
-                                                    Register OrigVReg,
-                                                    Register NewVReg) {
-  LLVM_DEBUG(dbgs() << "MachineLaneSSAUpdater::repairSSAForNewDef VReg=" << OrigVReg);
-  if (NewVReg.isValid()) {
-    LLVM_DEBUG(dbgs() << ", caller-provided NewVReg=" << NewVReg);
-  }
-  LLVM_DEBUG(dbgs() << "\n");
+                                                    Register OrigVReg) {
+  LLVM_DEBUG(dbgs() << "MachineLaneSSAUpdater::repairSSAForNewDef VReg=" << OrigVReg << "\n");
   
   MachineRegisterInfo &MRI = MF.getRegInfo();
   
-  // Step 1: Find the def operand that currently defines OrigVReg (violating SSA)
+  // Step 1: Find the def operand for OrigVReg
   MachineOperand *DefOp = nullptr;
   unsigned DefOpIdx = 0;
+  
   for (MachineOperand &MO : NewDefMI.defs()) {
     if (MO.getReg() == OrigVReg) {
       DefOp = &MO;
@@ -89,42 +85,32 @@ Register MachineLaneSSAUpdater::repairSSAForNewDef(MachineInstr &NewDefMI,
     LLVM_DEBUG(dbgs() << "  Full register def, DefMask=" << PrintLaneMask(DefMask) << "\n");
   }
   
-  // Step 3: Create or use provided new virtual register
-  Register NewSSAVReg;
-  if (NewVReg.isValid()) {
-    // Caller provided a register - use it
-    NewSSAVReg = NewVReg;
-    const TargetRegisterClass *RC = MRI.getRegClass(NewSSAVReg);
-    LLVM_DEBUG(dbgs() << "  Using caller-provided SSA vreg " << NewSSAVReg 
-                      << " with RC=" << TRI.getRegClassName(RC) << "\n");
+  // Step 3: Create a new virtual register with class matching MaskToRewrite width
+  const TargetRegisterClass *RC;
+  if (SubRegIdx) {
+    // For subreg defs, create register with class for the subreg (narrower)
+    const TargetRegisterClass *OrigRC = MRI.getRegClass(OrigVReg);
+    RC = TRI.getSubRegisterClass(OrigRC, SubRegIdx);
+    assert(RC && "Failed to get subregister class");
   } else {
-    // Create a new virtual register with appropriate register class
-    // If this is a subreg def, we need the class for the subreg, not the full reg
-    const TargetRegisterClass *RC;
-    if (SubRegIdx) {
-      // For subreg defs, get the subreg class
-      const TargetRegisterClass *OrigRC = MRI.getRegClass(OrigVReg);
-      RC = TRI.getSubRegisterClass(OrigRC, SubRegIdx);
-      assert(RC && "Failed to get subregister class for subreg def - would create incorrect MIR");
-    } else {
-      // For full reg defs, use the same class as OrigVReg
-      RC = MRI.getRegClass(OrigVReg);
-    }
-    
-    NewSSAVReg = MRI.createVirtualRegister(RC);
-    LLVM_DEBUG(dbgs() << "  Created new SSA vreg " << NewSSAVReg << " with RC=" << TRI.getRegClassName(RC) << "\n");
+    // For full register defs, use same class as OrigVReg
+    RC = MRI.getRegClass(OrigVReg);
   }
+  Register NewSSAVReg = MRI.createVirtualRegister(RC);
+  LLVM_DEBUG(dbgs() << "  Created new SSA vreg " << NewSSAVReg << " with RC=" << TRI.getRegClassName(RC) << "\n");
   
   // Step 4: Replace the operand in NewDefMI to define the new vreg
-  // If this was a subreg def, the new vreg is a full register of the subreg class
-  // so we clear the subreg index (e.g., %1.sub0:vreg_64 becomes %3:vgpr_32)
+  // Clear subreg index since NewSSAVReg is a full register of the (possibly narrower) class
   DefOp->setReg(NewSSAVReg);
   if (SubRegIdx) {
-    DefOp->setSubReg(0);
-    LLVM_DEBUG(dbgs() << "  Replaced operand: " << OrigVReg << "." << TRI.getSubRegIndexName(SubRegIdx)
-                      << " -> " << NewSSAVReg << " (full register)\n");
+    DefOp->setSubReg(0);  // Clear subreg - NewSSAVReg is full register of narrower class
+    DefOp->setIsUndef(false);  // Clear undef flag - verifier requires undef only with subreg
+    LLVM_DEBUG(dbgs() << "  Replaced operand: " << OrigVReg << "." 
+                      << TRI.getSubRegIndexName(SubRegIdx) 
+                      << " -> " << NewSSAVReg << " (full narrower register)\n");
   } else {
-    LLVM_DEBUG(dbgs() << "  Replaced operand: " << OrigVReg << " -> " << NewSSAVReg << "\n");
+    LLVM_DEBUG(dbgs() << "  Replaced operand: " << OrigVReg 
+                      << " -> " << NewSSAVReg << "\n");
   }
   
   // Step 5: Index the new instruction in SlotIndexes/LIS
@@ -551,7 +537,6 @@ void MachineLaneSSAUpdater::rewriteDominatedUses(Register OrigVReg,
   }
   
   MachineBasicBlock *DefBB = DefMI->getParent();
-  const TargetRegisterClass *NewRC = MRI.getRegClass(NewSSA);
 
   LLVM_DEBUG(dbgs() << "  Rewriting uses dominated by definition in BB#" << DefBB->getNumber() << ": ");
   LLVM_DEBUG(DefMI->print(dbgs()));
@@ -580,6 +565,7 @@ void MachineLaneSSAUpdater::rewriteDominatedUses(Register OrigVReg,
     LLVM_DEBUG(UseMI->print(dbgs()));
 
     const TargetRegisterClass *OpRC = MRI.getRegClass(OrigVReg);
+    const TargetRegisterClass *NewRC = MRI.getRegClass(NewSSA);
 
     // Case 1: Exact match - direct replacement
     if (OpMask == MaskToRewrite) {
@@ -597,7 +583,17 @@ void MachineLaneSSAUpdater::rewriteDominatedUses(Register OrigVReg,
         MO.setSubReg(0); // Clear subregister (NewSSA is a full register of NewRC)
         
         // Extend NewSSA's live interval to cover this use
-        SlotIndex UseIdx = LIS.getInstructionIndex(*UseMI).getRegSlot();
+        SlotIndex UseIdx;
+        if (UseMI->isPHI()) {
+          // For PHI, the value must be live at the end of the predecessor block
+          unsigned OpIdx = UseMI->getOperandNo(&MO);
+          MachineBasicBlock *Pred = UseMI->getOperand(OpIdx + 1).getMBB();
+          UseIdx = LIS.getMBBEndIdx(Pred);
+          LLVM_DEBUG(dbgs() << "      PHI use -> extending to end of BB#" 
+                            << Pred->getNumber() << "\n");
+        } else {
+          UseIdx = LIS.getInstructionIndex(*UseMI).getRegSlot();
+        }
         LiveInterval &NewLI = LIS.getInterval(NewSSA);
         LIS.extendToIndices(NewLI, {UseIdx});
         
@@ -638,44 +634,29 @@ void MachineLaneSSAUpdater::rewriteDominatedUses(Register OrigVReg,
       
     } else {
       // Case 3: Subset - use needs fewer lanes than NewSSA provides
-      // Need to remap subregister index from OrigVReg's register class to NewSSA's register class
-      //
-      // Example: OrigVReg is vreg_128, we redefine sub2_3 (64-bit), use accesses sub3 (32-bit)
-      //   MaskToRewrite = 0xF0  // sub2_3: lanes 4-7 in vreg_128 space
-      //   OpMask        = 0xC0  // sub3:   lanes 6-7 in vreg_128 space
-      //   NewSSA is vreg_64, has lanes 0-3 (but represents lanes 4-7 of OrigVReg)
-      //
-      // Algorithm: Shift OpMask down by the bit position of MaskToRewrite's LSB to map
-      // from OrigVReg's lane space into NewSSA's lane space, then find the subreg index.
-      //
-      // Why this works:
-      //   1. MaskToRewrite is contiguous (comes from subreg definition)
-      //   2. OpMask ⊆ MaskToRewrite (we're in subset case by construction)
-      //   3. Lane masks use bit positions that correspond to actual lane indices
-      //   4. Subreg boundaries are power-of-2 aligned in register class design
-      //
-      // Calculation:
-      //   Shift = countTrailingZeros(MaskToRewrite) = 4  // How far "up" MaskToRewrite is
-      //   NewMask = OpMask >> 4 = 0xC0 >> 4 = 0xC        // Map to NewSSA's lane space
-      //   0xC corresponds to sub1 in vreg_64 ✓
-      LLVM_DEBUG(dbgs() << "      Subset case -> remapping subregister index\n");
+      // Need to map OpMask to NewSSA's register class namespace if they differ
+      LLVM_DEBUG(dbgs() << "      Subset case -> finding subregister index\n");
       
-      // Find the bit offset of MaskToRewrite (position of its lowest set bit)
-      unsigned ShiftAmt = llvm::countr_zero(MaskToRewrite.getAsInteger());
-      assert(ShiftAmt < 64 && "MaskToRewrite should have at least one bit set");
+      LaneBitmask MappedOpMask = OpMask;
+      if (NewRC != OpRC) {
+        // Different register classes - need to map lane namespace
+        // MaskToRewrite defines which lanes of OrigVReg we redefined
+        // NewSSA is a narrower register that holds just those lanes
+        // Shift OpMask down to map from OrigVReg space to NewSSA space
+        unsigned ShiftAmt = llvm::countr_zero(MaskToRewrite.getAsInteger());
+        MappedOpMask = LaneBitmask(OpMask.getAsInteger() >> ShiftAmt);
+        
+        LLVM_DEBUG(dbgs() << "        Namespace mapping: OrigRC=" << TRI.getRegClassName(OpRC)
+                          << " NewRC=" << TRI.getRegClassName(NewRC)
+                          << "\n          OpMask=" << PrintLaneMask(OpMask)
+                          << " -> MappedOpMask=" << PrintLaneMask(MappedOpMask) << "\n");
+      }
       
-      // Shift OpMask down into NewSSA's lane space
-      LaneBitmask NewMask = LaneBitmask(OpMask.getAsInteger() >> ShiftAmt);
+      // Find the subregister index for MappedOpMask in NewSSA's register class
+      unsigned NewSubReg = getSubRegIndexForLaneMask(MappedOpMask, &TRI);
+      assert(NewSubReg && "Should find subreg index for mapped lanes");
       
-      // Find the subregister index for NewMask in NewSSA's register class
-      unsigned NewSubReg = getSubRegIndexForLaneMask(NewMask, &TRI);
-      assert(NewSubReg && "Should find subreg index for remapped lanes");
-      
-      LLVM_DEBUG(dbgs() << "        Remapping subreg:\n"
-                        << "          OrigVReg lanes: OpMask=" << PrintLaneMask(OpMask) 
-                        << " MaskToRewrite=" << PrintLaneMask(MaskToRewrite) << "\n"
-                        << "          Shift amount: " << ShiftAmt << "\n"
-                        << "          NewSSA lanes: NewMask=" << PrintLaneMask(NewMask)
+      LLVM_DEBUG(dbgs() << "        MappedOpMask=" << PrintLaneMask(MappedOpMask)
                         << " -> SubReg=" << TRI.getSubRegIndexName(NewSubReg) << "\n");
       
       MO.setReg(NewSSA);

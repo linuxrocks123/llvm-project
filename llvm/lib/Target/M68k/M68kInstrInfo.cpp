@@ -859,7 +859,8 @@ void M68kInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                                          const TargetRegisterClass *RC,
                                          const TargetRegisterInfo *TRI,
                                          Register VReg,
-                                         MachineInstr::MIFlag Flags) const {
+                                         MachineInstr::MIFlag Flags, unsigned SubRegIdx) const {
+  (void)SubRegIdx; // Unused parameter
   const MachineFrameInfo &MFI = MBB.getParent()->getFrameInfo();
   assert(MFI.getObjectSize(FrameIndex) >= TRI->getSpillSize(*RC) &&
          "Stack slot is too small to load");

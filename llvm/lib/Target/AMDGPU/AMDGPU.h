@@ -20,6 +20,7 @@ namespace llvm {
 
 class AMDGPUTargetMachine;
 class GCNTargetMachine;
+class MachineFunctionPass;
 class TargetMachine;
 
 // GlobalISel passes
@@ -99,7 +100,9 @@ void initializeAMDGPUAlwaysInlinePass(PassRegistry&);
 
 void initializeAMDGPUAsmPrinterPass(PassRegistry &);
 
+MachineFunctionPass *createAMDGPUSSARegisterSpillerPass();
 void initializeAMDGPUSSARegisterSpillerPass(PassRegistry &);
+extern char &AMDGPUSSARegisterSpillerID;
 
 // DPP/Iterative option enables the atomic optimizer with given strategy
 // whereas None disables the atomic optimizer.

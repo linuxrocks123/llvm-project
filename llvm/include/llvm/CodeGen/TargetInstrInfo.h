@@ -1208,11 +1208,14 @@ public:
   /// can be passed elsewhere. The \p Flags is used to set appropriate machine
   /// flags on the spill instruction e.g. FrameDestroy flag on a callee saved
   /// register reload instruction, part of epilogue, during the frame lowering.
+  /// If \p SubRegIdx is non-zero, the load will define only the specified
+  /// subregister of DestReg, useful for SSA-based register spilling.
   virtual void loadRegFromStackSlot(
       MachineBasicBlock &MBB, MachineBasicBlock::iterator MI, Register DestReg,
       int FrameIndex, const TargetRegisterClass *RC,
       const TargetRegisterInfo *TRI, Register VReg,
-      MachineInstr::MIFlag Flags = MachineInstr::NoFlags) const {
+      MachineInstr::MIFlag Flags = MachineInstr::NoFlags,
+      unsigned SubRegIdx = 0) const {
     llvm_unreachable("Target didn't implement "
                      "TargetInstrInfo::loadRegFromStackSlot!");
   }
