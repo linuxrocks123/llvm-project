@@ -174,6 +174,12 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
   LLVM_DEBUG(dbgs() << "processFunction: " << (IsVGPRPass ? "VGPR" : "SGPR")
                     << " pass, limit=" << RPLimit << "\n");
 
+  // Store RP limits for reload budget checking
+  if (IsVGPRPass)
+    VGPRLimit = RPLimit;
+  else
+    SGPRLimit = RPLimit;
+
   // Track if we made any modifications
   bool Changed = false;
 
@@ -263,19 +269,7 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
           ActiveRegs.remove(VMP);
         }
 
-        // Convert forward iterator to reverse iterator for spillAndReload
-        // We want ReverseI to point to the same instruction as I
-        // reverse_iterator(X) points to *std::prev(X), so we need X = std::next(I)
-        // But actually, we can construct directly: reverse_iterator(I)
-        // No wait, that's wrong too. Let me think...
-        // 
-        // Actually, since we're going backwards with reverse_iterator in processFunction,
-        // and we're now at forward iterator I pointing to instruction A,
-        // we want the reverse_iterator to also point to instruction A.
-        // 
-        // Standard semantics: *reverse_iterator(X) == *std::prev(X)
-        // We want: *ReverseI == *I (both point to same instruction)
-        // Therefore: *std::prev(X) == *I, so X = std::next(I)
+
         MachineBasicBlock::reverse_iterator ReverseI(std::next(I));
         
         // Call spillAndReload to handle atomic spill+reload+SSA repair
@@ -290,7 +284,6 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
       }
     }
   }
-  
   return Changed;
 }
 
@@ -386,8 +379,21 @@ void AMDGPUSSARegisterSpiller::sortRegSetByNextUse(
   
   // Sort using pre-computed distances
   Active.sort([&](const VRegMaskPair &A, const VRegMaskPair &B) {
-    // Shorter distance first (longer distance at back for spilling)
-    return DistanceMap[A] < DistanceMap[B];
+    unsigned DistA = DistanceMap[A];
+    unsigned DistB = DistanceMap[B];
+
+    // Primary sort: Shorter distance first (longer distance at back for spilling)
+    if (DistA != DistB)
+      return DistA < DistB;
+
+    // Tie-breaker: If distances are equal, prefer SMALLER register to spill
+    // We pop from the back, so put LARGER registers first (smaller at back)
+    // This ensures we spill exactly the amount needed, not more
+    // Example: Need to free 2 VGPRs, both v64 and v128 have same distance
+    //   → Put v128 first, v64 at back → pop v64 (2 VGPRs) instead of v128 (4 VGPRs)
+    unsigned SizeA = A.getLaneMask().getNumLanes();
+    unsigned SizeB = B.getLaneMask().getNumLanes();
+    return SizeA > SizeB;  // Larger first, so smaller is at back for popping
   });
   
   LLVM_DEBUG({
@@ -497,11 +503,7 @@ VRegMaskPairSet AMDGPUSSARegisterSpiller::getVMPsToSpill(
             ToSpill.insert(SubReg);
             RemainingToSpill = 0;
             break;
-            // TODO: find sub_mask of size RemainingToSpill in SubReg and spill
-            // it. Here we need to decide what is profitable - spill a
-            // sub-register which is larger then we really need or spill the
-            // sub-register which is exactly of the size we need but possibly is
-            // used closer
+            // TODO: find sub_mask of size RemainingToSpill in SubReg and spill it
             /*LaneBitmask SubMask = SubReg.getLaneMask();
             LaneBitmask SpillMask = SubMask &
             LaneBitmask::getLow(RemainingToSpill);
@@ -813,6 +815,14 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
       continue;
       
     MachineInstr *Head = G.getHead();
+
+    // Check if head was already rewritten by previous group's SSA repair
+    // This can happen when SSA updater inserts PHIs that dominate later groups
+    if (!usesSpilledVMP(Head, SpilledVMP)) {
+      LLVM_DEBUG(dbgs() << "\nSkipping group (head already rewritten): " << *Head);
+      continue;
+    }
+
     LLVM_DEBUG(dbgs() << "\nEmitting reload for group head: " << *Head);
     LLVM_DEBUG(dbgs() << "  Group size: " << G.size() << " use(s)\n");
     
@@ -844,6 +854,13 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
     
     // Step 4b: Hoisting impossible, classify and handle each use
     for (MachineInstr *UseMI : ReachableUses) {
+      // Check if this use was already rewritten by SSA repair
+      // Can happen from: (1) dominated use SSA repair, or (2) previous reachable use SSA repair
+      if (!usesSpilledVMP(UseMI, SpilledVMP)) {
+        LLVM_DEBUG(dbgs() << "  Skipping use (already rewritten): " << *UseMI);
+        continue;
+      }
+
       LLVM_DEBUG(dbgs() << "  Processing reachable use: " << *UseMI);
       
       // Emit reload instruction (no SSA repair yet - will be done after CFG transform)
@@ -1005,6 +1022,48 @@ MachineInstr *AMDGPUSSARegisterSpiller::emitReload(
     }
   });
 
+  // CHECK: Verify current RP is within budget before reload
+  // After reload, SSA updater will replace uses of the old register,
+  // making it dead. Net RP change is ~0 (reload replaces old register).
+  // If RP is already over budget, reloading is impossible!
+  
+  // Get live registers at the insertion point
+  GCNRPTracker::LiveRegSet LiveRegs = getLiveRegsBefore(*InsertBefore, *LIS);
+  
+  // Compute current pressure
+  GCNRegPressure CurPressure = getRegPressure(*MRI, LiveRegs);
+  const GCNSubtarget &ST = MBB->getParent()->getSubtarget<GCNSubtarget>();
+  
+  // Get current pressure for the appropriate register class
+  unsigned CurRP = 0;
+  unsigned RPLimitForCheck = 0;
+  
+  if (TRI->isVGPRClass(RC)) {
+    CurRP = CurPressure.getVGPRNum(ST.hasGFX90AInsts());
+    RPLimitForCheck = VGPRLimit;
+  } else if (TRI->isSGPRClass(RC)) {
+    CurRP = CurPressure.getSGPRNum();
+    RPLimitForCheck = SGPRLimit;
+  }
+  
+  LLVM_DEBUG(dbgs() << "emitReload(): RP check: current=" << CurRP
+                    << " (limit=" << RPLimitForCheck << ")\n");
+  
+  if (CurRP > RPLimitForCheck) {
+    std::string Msg;
+    raw_string_ostream OS(Msg);
+    OS << "SSA Spiller: Cannot reload register " 
+       << getRegNameForDebug(OrigVReg, MRI, TRI)
+       << " - current register pressure already exceeds budget!\n";
+    OS << "  Current RP: " << CurRP << "\n";
+    OS << "  Budget limit: " << RPLimitForCheck << "\n";
+    OS << "  Note: Reload will replace old register use, but RP will remain at " << CurRP << "\n";
+    OS << "  This indicates the input program requires more registers than available.\n";
+    OS << "  Insertion point: " << *InsertBefore;
+    OS << "  Block: " << printMBBReference(*MBB) << "\n";
+    report_fatal_error(Twine(OS.str()));
+  }
+
   // Emit reload instruction directly to OrigVReg (or OrigVReg.subreg)
   // This temporarily violates SSA, which MachineLaneSSAUpdater will fix
   TII->loadRegFromStackSlot(*MBB, InsertBefore, OrigVReg, FI, RC, TRI, 
@@ -1105,6 +1164,32 @@ void AMDGPUSSARegisterSpiller::dumpRegSet(
 // ============================================================================
 // Divergent Path Optimization Helpers
 // ============================================================================
+
+bool AMDGPUSSARegisterSpiller::usesSpilledVMP(const MachineInstr *MI, 
+                                               VRegMaskPair SpilledVMP) const {
+  Register SpilledReg = SpilledVMP.getVReg();
+  LaneBitmask SpilledMask = SpilledVMP.getLaneMask();
+  
+  // Quick check: does the instruction read this virtual register at all?
+  // This handles partial defines correctly (read-modify-write)
+  if (!MI->readsVirtualRegister(SpilledReg))
+    return false;
+  
+  // Found a use, now check if it overlaps with spilled lanes
+  for (const MachineOperand &MO : MI->uses()) {
+    if (MO.isReg() && MO.getReg() == SpilledReg) {
+      LaneBitmask UseMask = TRI->getSubRegIndexLaneMask(MO.getSubReg());
+      if (UseMask == LaneBitmask::getAll())
+        UseMask = MRI->getMaxLaneMaskForVReg(SpilledReg);
+      // Check if this use overlaps with the spilled lanes
+      if ((UseMask & SpilledMask).any()) {
+        return true;
+      }
+    }
+  }
+  
+  return false;
+}
 
 bool AMDGPUSSARegisterSpiller::isDivergentInstr(const MachineInstr *MI) const {
   // Check for EXEC modifications

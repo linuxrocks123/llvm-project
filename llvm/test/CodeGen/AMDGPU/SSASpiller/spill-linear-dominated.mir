@@ -1,0 +1,90 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs -run-pass=amdgpu-ssa-register-spiller -o - %s | FileCheck %s
+
+# Test SSA spiller Pattern 1.1: Simple Linear (Dominated Use, No EXEC)
+# Verifies:
+# 1. Basic spill/reload in dominated case (no split-before-use)
+# 2. No WWM wrapping (no EXEC modifications on path)
+# 3. Correct spill placement at high RP point
+# 4. Reload before use
+# 5. No PHI insertion (dominated case)
+
+--- |
+  target datalayout = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5-G1-ni:7:8:9"
+  target triple = "amdgcn"
+  
+  define amdgpu_kernel void @test_linear_dominated() #0 {
+  bb0:
+    br label %bb1
+  
+  bb1:
+    br label %bb2
+  
+  bb2:
+    ret void
+  }
+  
+  attributes #0 = { "amdgpu-num-vgpr"="8" "target-cpu"="gfx1200" }
+...
+---
+name:            test_linear_dominated
+alignment:       1
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vreg_128 }
+  - { id: 1, class: vreg_64 }
+  - { id: 2, class: vreg_64 }
+stack:
+frameInfo:
+  maxAlignment:    4
+machineFunctionInfo:
+  stackPtrOffsetReg: '$sgpr32'
+body: |
+  ; CHECK-LABEL: name: test_linear_dominated
+  ; CHECK: bb.0:
+  ; CHECK:   successors: %bb.1(0x80000000)
+  ; CHECK:   liveins: $vgpr0_vgpr1_vgpr2_vgpr3
+  ; CHECK:   [[SPILLREG:%[0-9]+]]:vreg_128 = COPY $vgpr0_vgpr1_vgpr2_vgpr3
+  
+  bb.0:
+    successors: %bb.1(0x80000000)
+    liveins: $vgpr0_vgpr1_vgpr2_vgpr3, $vgpr4_vgpr5, $vgpr6_vgpr7
+    
+    ; Define register to be spilled - copy from physical register
+    %0:vreg_128 = COPY $vgpr0_vgpr1_vgpr2_vgpr3
+
+  ; High register pressure - forces spilling
+  ; With amdgpu-num-vgpr=8, after 90% safety margin: floor(8 * 0.9) = 7 VGPRs available
+  ; %0:vreg_128 defined in bb.0: RP = 4
+  ; %1:vreg_64 defined: RP = 6
+  ; Spill %1 here (tie-breaker prefers smaller): RP drops to 4
+  ; %2:vreg_64 defined: RP = 6 (would be 8 without spill)
+  ; %2 dies after use: RP = 4
+  ; CHECK: bb.1:
+  ; CHECK:   successors: %bb.2(0x80000000)
+  ; CHECK:   [[PRESSURE1:%[0-9]+]]:vreg_64 = COPY $vgpr4_vgpr5
+  ; CHECK:   SI_SPILL_V64_SAVE [[PRESSURE1]], %stack.{{[0-9]+}}, $sgpr32, 0, implicit $exec
+  ; CHECK:   [[PRESSURE2:%[0-9]+]]:vreg_64 = COPY $vgpr6_vgpr7
+  
+  bb.1:
+    successors: %bb.2(0x80000000)
+    liveins: $vgpr4_vgpr5, $vgpr6_vgpr7
+    
+    %1:vreg_64 = COPY $vgpr4_vgpr5
+    %2:vreg_64 = COPY $vgpr6_vgpr7
+    ; Use %2 to keep it live temporarily
+    S_NOP 0, implicit %2
+    ; %2 dies here, RP drops to 2
+
+  ; Reload before use (dominated case - no split)
+  ; CHECK: bb.2:
+  ; CHECK:   [[RELOAD1:%[0-9]+]]:vreg_64 = SI_SPILL_V64_RESTORE %stack.{{[0-9]+}}, $sgpr32, 0, implicit $exec
+  ; CHECK:   S_ENDPGM 0, implicit [[SPILLREG]], implicit [[RELOAD1]]
+  
+  bb.2:
+    ; Use of spilled register (dominated by def in bb.0)
+    ; Before reload: RP = 4 (%0 only, %1 was spilled)
+    ; After reload: RP = 4 + 2 = 6 (within 7 limit)
+    S_ENDPGM 0, implicit %0, implicit %1
+
+...

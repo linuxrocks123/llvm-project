@@ -1,0 +1,123 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs -run-pass=amdgpu-ssa-register-spiller -o - %s | FileCheck %s
+
+# Test SSA spiller Pattern 1.3: Dominated with Branches
+# Verifies:
+# 1. Spill dominates all uses (on common path before branches)
+# 2. Multiple paths between spill and use
+# 3. Single reload at join point (no PHI needed - dominated case)
+# 4. No WWM (uniform branches, no EXEC modifications)
+# 5. Correct handling of multi-path dominated scenario
+
+--- |
+  target datalayout = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5-G1-ni:7:8:9"
+  target triple = "amdgcn"
+  
+  define amdgpu_kernel void @test_dominated_branches(i32 %cond) #0 {
+  entry:
+    %cmp = icmp sgt i32 %cond, 0
+    br i1 %cmp, label %path_a, label %path_b
+  
+  path_a:
+    br label %join
+  
+  path_b:
+    br label %join
+  
+  join:
+    ret void
+  }
+  
+  attributes #0 = { "amdgpu-num-vgpr"="8" "target-cpu"="gfx1200" }
+...
+---
+name:            test_dominated_branches
+alignment:       1
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vreg_128 }
+  - { id: 1, class: vreg_64 }
+  - { id: 2, class: vreg_64 }
+  - { id: 3, class: sreg_32 }
+stack:
+frameInfo:
+  maxAlignment:    4
+machineFunctionInfo:
+  stackPtrOffsetReg: '$sgpr32'
+body: |
+  ; CHECK-LABEL: name: test_dominated_branches
+  ; CHECK: bb.0.entry:
+  ; CHECK:   successors: %bb.1(0x80000000)
+  ; CHECK:   [[SPILLREG:%[0-9]+]]:vreg_128 = COPY $vgpr0_vgpr1_vgpr2_vgpr3
+  ; CHECK:   [[COND:%[0-9]+]]:sreg_32 = COPY $sgpr0
+  
+  bb.0.entry:
+    successors: %bb.1(0x80000000)
+    liveins: $vgpr0_vgpr1_vgpr2_vgpr3, $vgpr4_vgpr5, $vgpr6_vgpr7, $sgpr0
+    
+    ; Define register to be spilled
+    %0:vreg_128 = COPY $vgpr0_vgpr1_vgpr2_vgpr3
+    
+    ; Condition for branch
+    %3:sreg_32 = COPY $sgpr0
+
+  ; Spill point before branching (spill dominates all paths)
+  ; With amdgpu-num-vgpr=8, after 90% safety margin: floor(8 * 0.9) = 7 VGPRs available
+  ; %0:vreg_128 defined in bb.0: RP = 4
+  ; %1:vreg_64 defined: RP = 6
+  ; %2:vreg_64 defined: RP = 8 (exceeds limit) - triggers spill of %1 (smaller, same distance)
+  ; %2 dies: RP = 6
+  ; CHECK: bb.1:
+  ; CHECK:   successors: %bb.2(0x40000000), %bb.3(0x40000000)
+  ; CHECK:   SI_SPILL_V64_SAVE [[PRESSURE1:%[0-9]+]], %stack.{{[0-9]+}}, $sgpr32, 0, implicit $exec
+  ; CHECK:   [[PRESSURE2:%[0-9]+]]:vreg_64 = COPY $vgpr6_vgpr7
+  
+  bb.1:
+    successors: %bb.2(0x40000000), %bb.3(0x40000000)
+    liveins: $vgpr4_vgpr5, $vgpr6_vgpr7
+    
+    ; High register pressure forces spill
+    %1:vreg_64 = COPY $vgpr4_vgpr5
+    %2:vreg_64 = COPY $vgpr6_vgpr7
+    ; Use %2 to keep it live temporarily
+    S_NOP 0, implicit %2
+    ; %2 dies here, RP drops to 6
+    
+    ; Branch after spill (uniform, no EXEC modification)
+    S_CMP_GT_I32 %3, 10, implicit-def $scc
+    S_CBRANCH_SCC1 %bb.2, implicit $scc
+    S_BRANCH %bb.3
+
+  ; Path A: Some computation
+  ; CHECK: bb.2.path_a:
+  ; CHECK:   successors: %bb.4(0x80000000)
+  
+  bb.2.path_a:
+    successors: %bb.4(0x80000000)
+    
+    ; Some computation on path A (empty for simplicity)
+    S_BRANCH %bb.4
+
+  ; Path B: Different computation
+  ; CHECK: bb.3.path_b:
+  ; CHECK:   successors: %bb.4(0x80000000)
+  
+  bb.3.path_b:
+    successors: %bb.4(0x80000000)
+    
+    ; Some computation on path B (empty for simplicity)
+    S_BRANCH %bb.4
+
+  ; Join point: reload and use
+  ; Before reload: RP = 4 (%0 only)
+  ; After reload: RP = 4 + 2 = 6 (within 7 limit)
+  ; CHECK: bb.4.join:
+  ; CHECK:   [[RELOAD1:%[0-9]+]]:vreg_64 = SI_SPILL_V64_RESTORE %stack.{{[0-9]+}}, $sgpr32, 0, implicit $exec
+  ; CHECK:   S_ENDPGM 0, implicit [[SPILLREG]], implicit [[RELOAD1]]
+  
+  bb.4.join:
+    ; Use of spilled register (dominated by spill in bb.1)
+    S_ENDPGM 0, implicit %0, implicit %1
+
+...
+

@@ -144,7 +144,8 @@ Register MachineLaneSSAUpdater::repairSSAForNewDef(MachineInstr &NewDefMI,
     }
   }
   
-  LLVM_DEBUG(dbgs() << "  repairSSAForNewDef complete, returning " << NewSSAVReg << "\n");
+  LLVM_DEBUG(dbgs() << "  repairSSAForNewDef complete, returning " 
+                    << printReg(NewSSAVReg, &TRI) << "\n");
   return NewSSAVReg;
 }
 

@@ -78,6 +78,10 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   // for reachable but not dominated uses (divergent paths)
   DenseMap<MachineInstr *, SmallVector<MachineInstr *, 2>> SpillToReloadMap;
 
+  // Register pressure limits (set during processFunction)
+  unsigned VGPRLimit = 0;
+  unsigned SGPRLimit = 0;
+
   // TODO: Add tracking for spilled/reloaded registers if needed for
   // verification
 
@@ -219,6 +223,10 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   /// StopInstr: if provided, stop checking at this instruction in EndBB (exclusive)
   bool hasUseOnPath(MachineBasicBlock *StartBB, MachineBasicBlock *EndBB, 
                     VRegMaskPair SpilledVMP, MachineInstr *StopInstr = nullptr) const;
+  
+  /// Check if the given instruction still uses the spilled register with
+  /// overlapping lane mask. Returns false if the use was rewritten by SSA repair.
+  bool usesSpilledVMP(const MachineInstr *MI, VRegMaskPair SpilledVMP) const;
   
   /// Attempts to hoist spill to NCD if no uses exist on either path
   /// Returns true if hoisting was performed
