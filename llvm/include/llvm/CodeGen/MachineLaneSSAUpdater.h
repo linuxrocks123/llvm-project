@@ -73,6 +73,43 @@ public:
   // Returns: The newly created SSA-repaired virtual register
   Register repairSSAForNewDef(MachineInstr &NewDefMI, Register OrigVReg);
 
+  /// Check if a use is reachable from a definition using IDF analysis.
+  /// 
+  /// Extracts DefMI, DefBlock, DefMask from DefOp and UseMI from UseOp.
+  /// 
+  /// Fast paths:
+  /// - Same block: check instruction order
+  /// - Non-PHI uses: check block dominance
+  /// - PHI with dominated predecessor: return true
+  ///
+  /// Slow path (PHI with non-dominated predecessor):
+  /// Uses pruned IDF to determine reachability
+  ///
+  /// \param DefOp - The definition operand (provides DefMI, block, mask)
+  /// \param UseOp - The use operand (provides UseMI)
+  /// \param OrigVReg - The original register being analyzed
+  /// \returns true if UseOp is reachable from DefOp
+  bool isUseReachableFromDef(MachineOperand &DefOp,
+                             MachineOperand &UseOp,
+                             Register OrigVReg);
+
+  /// Get pruned IDF blocks for a definition.
+  /// 
+  /// Computes the Iterated Dominance Frontier (IDF) for DefBlock, pruned by
+  /// LiveInterval analysis (only includes blocks where OrigVReg lanes are live-in).
+  ///
+  /// FIXME: Add caching to avoid recomputation. Cache key: (VReg, Mask, DefBlockNumber)
+  /// FIXME: Return const reference to cached result to avoid copies
+  ///
+  /// \param OrigVReg - The register to analyze
+  /// \param DefMask - Lane mask of the definition
+  /// \param DefBlock - The definition block
+  /// \param OutIDFBlocks - Output vector of IDF blocks
+  void getPrunedIDF(Register OrigVReg,
+                    LaneBitmask DefMask,
+                    MachineBasicBlock *DefBlock,
+                    SmallVectorImpl<MachineBasicBlock *> &OutIDFBlocks);
+
 private:
   // Common SSA repair logic
   void performSSARepair(Register NewVReg, Register OrigVReg, 
@@ -125,7 +162,8 @@ private:
 
   // Internal helper methods for use rewriting
   VNInfo *incomingOnEdge(LiveInterval &LI, MachineInstr *Phi, MachineOperand &PhiOp);
-  bool defReachesUse(MachineInstr *DefMI, MachineInstr *UseMI, MachineOperand &UseOp);
+  bool defDominatesUse(MachineInstr *DefMI, MachineInstr *UseMI, MachineOperand &UseOp);
+  bool defReachesUse(MachineInstr *DefMI, Register NewSSA, MachineInstr *UseMI, MachineOperand &UseOp);
   LaneBitmask operandLaneMask(const MachineOperand &MO);
   Register buildRSForSuperUse(MachineInstr *UseMI, MachineOperand &MO,
                              Register OldVR, Register NewVR, LaneBitmask MaskToRewrite,

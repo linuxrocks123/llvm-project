@@ -68,6 +68,10 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   SlotIndexes *Indexes = nullptr;
   MachineDominatorTree *DT = nullptr;
 
+  // SSA updater for IDF-based reachability and SSA repair
+  // FIXME: Add cache invalidation when CFG changes
+  std::unique_ptr<MachineLaneSSAUpdater> SSAUpdater;
+
   // Next use analysis for spill candidate selection
   AMDGPUNextUseAnalysis::Result *NU = nullptr;
 

@@ -1,0 +1,132 @@
+# XFAIL: *
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs -run-pass=amdgpu-ssa-register-spiller -o - %s | FileCheck %s
+
+# Test: Balanced spilling with use-before-spill (NOT YET IMPLEMENTED)
+# 
+# NOTE: Balanced spilling is not implemented yet! This test currently fails.
+# See AMDGPUSSARegisterSpiller.cpp:1561-1564 for the TODO.
+#
+# Expected behavior (when implemented):
+# 1. Path A: Register %0 is used before high RP forces spill (cannot hoist to NCD)
+# 2. Path B: Also has high RP, triggering balanced spill decision
+# 3. Spiller inserts spills on BOTH paths (balanced spilling)
+# 4. Join point gets value PHI with two reload operands
+#
+# Current behavior (split-before-use):
+# - Only path B spills %0
+# - Path A keeps %0 live (no spill needed since %0 dies after early use)
+# - Join point gets value PHI with one reload and one original register
+#
+# When implementing balanced spilling, the cost model should check:
+# - avgRP_clean >= 0.8*RPLimit AND len_clean >= 50 instructions
+# - If true, insert additional spill on clean path after last use
+
+--- |
+  target datalayout = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5-G1-ni:7:8:9"
+  target triple = "amdgcn"
+  
+  define amdgpu_kernel void @test_balanced_spill(i32 %cond) #0 {
+  entry:
+    %cmp = icmp eq i32 %cond, 0
+    br i1 %cmp, label %path_a, label %path_b
+  
+  path_a:
+    br label %join
+  
+  path_b:
+    br label %join
+  
+  join:
+    ret void
+  }
+  
+  attributes #0 = { "amdgpu-num-vgpr"="13" "target-cpu"="gfx1200" }
+...
+---
+name:            test_balanced_spill
+alignment:       1
+tracksRegLiveness: true
+noPhis:          false
+registers:
+  - { id: 0, class: vreg_128 }
+  - { id: 1, class: vreg_128 }
+  - { id: 2, class: vreg_128 }
+  - { id: 3, class: sreg_32 }
+  - { id: 4, class: vreg_128 }
+  - { id: 5, class: vreg_128 }
+stack:
+frameInfo:
+  maxAlignment:    4
+machineFunctionInfo:
+  stackPtrOffsetReg: '$sgpr32'
+body: |
+  ; CHECK-LABEL: name: test_balanced_spill
+  ; CHECK: bb.0.entry:
+  ; CHECK:   [[REG:%[0-9]+]]:vreg_128 = COPY $vgpr0_vgpr1_vgpr2_vgpr3
+  
+  bb.0.entry:
+    successors: %bb.1(0x40000000), %bb.2(0x40000000)
+    liveins: $vgpr0_vgpr1_vgpr2_vgpr3, $sgpr0
+    
+    ; Define register that will be spilled on both paths
+    %0:vreg_128 = COPY $vgpr0_vgpr1_vgpr2_vgpr3
+    
+    ; Branch condition
+    %3:sreg_32 = COPY $sgpr0
+    S_CMP_EQ_U32 %3, 0, implicit-def $scc
+    S_CBRANCH_SCC1 %bb.1, implicit $scc
+    S_BRANCH %bb.2
+
+  ; Path A: Use before spill (cannot hoist to NCD)
+  ; CHECK: bb.1.path_a:
+  ; CHECK:   S_NOP 0, implicit [[REG]]
+  ; CHECK:   SI_SPILL_V128_SAVE [[REG]], %stack.{{[0-9]+}}, $sgpr32, 0, implicit $exec
+  
+  bb.1.path_a:
+    successors: %bb.3(0x80000000)
+    
+    ; Early use of %0 - prevents hoisting spill to NCD
+    S_NOP 0, implicit %0
+    
+    ; High RP forcing %0 to be spilled
+    %1:vreg_128 = IMPLICIT_DEF
+    %2:vreg_128 = IMPLICIT_DEF
+    ; %0, %1, %2 all live = 12 VGPRs > limit of 8
+    S_NOP 0, implicit %1, implicit %2
+    S_BRANCH %bb.3
+
+  ; Path B: Also high RP - triggers balanced spilling
+  ; CHECK: bb.2.path_b:
+  ; CHECK:   SI_SPILL_V128_SAVE [[REG]], %stack.{{[0-9]+}}, $sgpr32, 0, implicit $exec
+  
+  bb.2.path_b:
+    successors: %bb.3(0x80000000)
+    
+    ; High RP on this path too - makes balanced spilling profitable
+    %4:vreg_128 = IMPLICIT_DEF
+    %5:vreg_128 = IMPLICIT_DEF
+    ; %0, %4, %5 all live = 12 VGPRs > limit of 8
+    S_NOP 0, implicit %4, implicit %5
+    S_BRANCH %bb.3
+
+  ; Join point: Split-before-use
+  ; CHECK: bb.3.join:
+  ; CHECK:   [[FLAG:%[0-9]+]]:sreg_32 = PHI {{%[0-9]+}}, %bb.1, {{%[0-9]+}}, %bb.2
+  ; CHECK:   S_CMP_EQ_U32 [[FLAG]], 0, implicit-def $scc
+  ; CHECK:   S_CBRANCH_SCC1 %bb.5, implicit $scc
+  
+  ; Reload block
+  ; CHECK: bb.4.join:
+  ; CHECK:   [[RELOAD:%[0-9]+]]:vreg_128 = SI_SPILL_V128_RESTORE %stack.{{[0-9]+}}, $sgpr32, 0, implicit $exec
+  
+  ; Value PHI
+  ; CHECK: bb.5.join:
+  ; CHECK:   [[VALUEPHI:%[0-9]+]]:vreg_128 = PHI [[RELOAD]], %bb.4, [[RELOAD]], %bb.3
+  ; CHECK:   S_ENDPGM 0, implicit [[VALUEPHI]]
+  
+  bb.3.join:
+    ; Use of %0 at join point - both paths spilled it
+    S_ENDPGM 0, implicit %0
+
+...
+

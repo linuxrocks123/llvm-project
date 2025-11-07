@@ -90,6 +90,16 @@ public:
   bool operator==(const VRegMaskPair &Other) const {
     return VReg == Other.VReg && LaneMask == Other.LaneMask;
   }
+
+  /// Check if this VRegMaskPair overlaps with another.
+  /// Two VRegMaskPairs overlap if they refer to the same virtual register
+  /// and their lane masks have at least one lane in common.
+  ///
+  /// \param Other - The VRegMaskPair to check for overlap
+  /// \returns true if both refer to the same VReg and have overlapping lanes
+  bool overlaps(const VRegMaskPair &Other) const {
+    return VReg == Other.VReg && (LaneMask & Other.LaneMask).any();
+  }
 };
 
 class LaneCoverageResult {

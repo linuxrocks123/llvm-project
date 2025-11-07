@@ -174,6 +174,10 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
   LLVM_DEBUG(dbgs() << "processFunction: " << (IsVGPRPass ? "VGPR" : "SGPR")
                     << " pass, limit=" << RPLimit << "\n");
 
+  // Initialize SSA updater (reused throughout the pass, caches IDF computations)
+  // FIXME: Clear cache if CFG changes during spilling
+  SSAUpdater = std::make_unique<MachineLaneSSAUpdater>(MF, *LIS, *DT, *TRI);
+
   // Store RP limits for reload budget checking
   if (IsVGPRPass)
     VGPRLimit = RPLimit;
@@ -691,69 +695,32 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
     }
   }
   
-  // Step 1a: Calculate IDF only if we have non-dominated uses
-  // Then classify non-dominated uses as reachable or unreachable
+  // Step 1a: Classify non-dominated uses using SSA updater's reachability API
   SmallVector<MachineInstr *> ReachableUses;
-  SmallVector<MachineBasicBlock *> PrunedIDFBlocks;
   
   if (!NonDominatedUses.empty()) {
-    MachineBasicBlock *SpillBlock = SpillMI->getParent();
-    SmallPtrSet<MachineBasicBlock *, 4> DefBlocks;
-    DefBlocks.insert(SpillBlock);
+    // Use class member SSA updater (caches IDF computations across calls)
     
-    IDFCalculatorBase<MachineBasicBlock, false> IDF(*DT);
-    SmallVector<MachineBasicBlock *> IDFBlocks;
-    IDF.setDefiningBlocks(DefBlocks);
-    IDF.calculate(IDFBlocks);
-    for (auto *BB : IDFBlocks) {
-      // Check if SpilledReg is live-in to this block
-      bool IsLiveIn = false;
-      if (LIS) {
-        LiveInterval &LI = LIS->getInterval(SpilledReg);
-        SlotIndex BlockStart = LIS->getMBBStartIdx(BB);
-        // Check if the register is live at block start
-        if (LI.liveAt(BlockStart)) {
-          IsLiveIn = true;
-        }
-      }
-      
-      if (IsLiveIn) {
-        PrunedIDFBlocks.push_back(BB);
-      }
-    }
+    // Find the spill use operand (spill stores the register, so it's a use)
+    // We treat this as the "def point" for reachability - after this point,
+    // the value is spilled and no longer available in registers
+    MachineOperand *SpillUseOp = SpillMI->findRegisterUseOperand(SpilledReg, TRI, /*isKill=*/false);
+    assert(SpillUseOp && "Spill must use the register");
     
-    LLVM_DEBUG({
-      dbgs() << "  IDF blocks for spill (pruned by LiveIn): ";
-      for (auto *BB : PrunedIDFBlocks)
-        dbgs() << BB->getName() << " ";
-      dbgs() << "\n";
-    });
-    
-    // Classify non-dominated uses: reachable or unreachable
     for (MachineInstr *UseMI : NonDominatedUses) {
-      MachineBasicBlock *UseBB = UseMI->getParent();
-      
-      // Use is reachable if:
-      // 1. Use is in a pruned IDF block, OR
-      // 2. Use is dominated by a pruned IDF block
-      bool IsReachable = false;
-      
-      if (llvm::find(PrunedIDFBlocks, UseBB) != PrunedIDFBlocks.end()) {
-        IsReachable = true;
-      } else {
-        for (auto *IDFBB : PrunedIDFBlocks) {
-          if (DT->dominates(IDFBB, UseBB)) {
-            IsReachable = true;
-            break;
+      // Find any use operand for the spilled register
+      if (MachineOperand *UseOp = UseMI->findRegisterUseOperand(SpilledReg, TRI, /*isKill=*/false)) {
+        // Check if this use overlaps with spilled lanes
+        VRegMaskPair UseVMP(*UseOp, TRI, MRI);
+        if (UseVMP.overlaps(SpilledVMP)) {
+          // Use SSA updater's IDF-based reachability check (with caching)
+          if (SSAUpdater->isUseReachableFromDef(*SpillUseOp, *UseOp, SpilledReg)) {
+            ReachableUses.push_back(UseMI);
+            LLVM_DEBUG(dbgs() << "  Classified as reachable: " << *UseMI);
+          } else {
+            LLVM_DEBUG(dbgs() << "  Unreachable use (ignored): " << *UseMI);
           }
         }
-      }
-      
-      if (IsReachable) {
-        ReachableUses.push_back(UseMI);
-        LLVM_DEBUG(dbgs() << "  Classified as reachable (divergent): " << *UseMI);
-      } else {
-        LLVM_DEBUG(dbgs() << "  Unreachable use (ignored): " << *UseMI);
       }
     }
   }
@@ -884,6 +851,10 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
         dbgs() << "    NCD: " << printMBBReference(*NCD) << "\n";
         dbgs() << "    Classification: " << (IsDivergent ? "DIVERGENT" : "UNIFORM") << "\n";
       });
+      
+      // Get cached IDF blocks for WWM wrapping (computed during reachability check)
+      SmallVector<MachineBasicBlock *, 4> PrunedIDFBlocks;
+      SSAUpdater->getPrunedIDF(SpilledReg, SpilledMask, SpillMI->getParent(), PrunedIDFBlocks);
       
       if (IsDivergent) {
         // Divergent: EXEC/VCC changes between NCD and spill/use
@@ -1085,16 +1056,12 @@ MachineInstr *AMDGPUSSARegisterSpiller::emitReload(
 Register AMDGPUSSARegisterSpiller::repairSSAForReload(
     MachineInstr *ReloadMI, VRegMaskPair VMP) {
   Register OrigVReg = VMP.getVReg();
-  MachineBasicBlock *MBB = ReloadMI->getParent();
   
   LLVM_DEBUG(dbgs() << "repairSSAForReload(): Repairing SSA for reload: " 
                     << *ReloadMI);
 
-  // Call MachineLaneSSAUpdater to repair SSA form
-  // It will create a new SSA register with the appropriate class based on DefMask
-  MachineFunction &MF = *MBB->getParent();
-  MachineLaneSSAUpdater SSAUpdater(MF, *LIS, *DT, *TRI);
-  Register NewVReg = SSAUpdater.repairSSAForNewDef(*ReloadMI, OrigVReg);
+  // Use class member SSA updater (shares IDF cache with reachability analysis)
+  Register NewVReg = SSAUpdater->repairSSAForNewDef(*ReloadMI, OrigVReg);
 
   LLVM_DEBUG(dbgs() << "repairSSAForReload(): SSA repaired, new register is "
                     << printReg(NewVReg, TRI);

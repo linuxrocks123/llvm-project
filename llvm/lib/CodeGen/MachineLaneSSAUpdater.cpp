@@ -553,8 +553,9 @@ void MachineLaneSSAUpdater::rewriteDominatedUses(Register OrigVReg,
     if (UseMI == DefMI)
       continue;
 
-    // Check if this use is reached by our definition
-    if (!defReachesUse(DefMI, UseMI, MO))
+    // Check if this use is DOMINATED by our definition
+    // Reachable-but-not-dominated uses should use PHI results, not NewSSA directly
+    if (!defDominatesUse(DefMI, UseMI, MO))
       continue;
 
     // Get the lane mask for this operand
@@ -687,27 +688,160 @@ VNInfo *MachineLaneSSAUpdater::incomingOnEdge(LiveInterval &LI, MachineInstr *Ph
 }
 
 /// Check if \p DefMI's definition reaches \p UseMI's use operand.
-/// During SSA reconstruction, LiveIntervals may not be complete yet, so we use
-/// dominance-based checking rather than querying LiveInterval reachability.
-bool MachineLaneSSAUpdater::defReachesUse(MachineInstr *DefMI,
-                                           MachineInstr *UseMI, 
-                                           MachineOperand &UseOp) {
-  // For PHI uses, check if DefMI dominates the predecessor block
-  if (UseMI->isPHI()) {
-    unsigned OpIdx = UseMI->getOperandNo(&UseOp);
-    MachineBasicBlock *Pred = UseMI->getOperand(OpIdx + 1).getMBB();
-    return MDT.dominates(DefMI->getParent(), Pred);
-  }
+/// Get pruned IDF blocks for a definition (public API).
+///
+/// FIXME: This currently recomputes IDF on every call. Add caching tomorrow:
+/// - Cache key: struct { Register VReg; LaneBitmask Mask; unsigned DefBlockNum; }
+/// - Cache storage: DenseMap<CacheKey, SmallVector<MachineBasicBlock*, 4>>
+/// - Return const reference to avoid copies
+void MachineLaneSSAUpdater::getPrunedIDF(Register OrigVReg,
+                                          LaneBitmask DefMask,
+                                          MachineBasicBlock *DefBlock,
+                                          SmallVectorImpl<MachineBasicBlock *> &OutIDFBlocks) {
+  OutIDFBlocks.clear();
+  
+  // FIXME: Check cache here
+  // IDFCacheKey Key{OrigVReg, DefMask, DefBlock->getNumber()};
+  // auto It = IDFCache.find(Key);
+  // if (It != IDFCache.end()) {
+  //   OutIDFBlocks = It->second;  // Or return const& to avoid copy
+  //   return;
+  // }
+  
+  // Compute IDF (will be cached tomorrow)
+  SmallVector<MachineBasicBlock *, 1> DefBlocks = {DefBlock};
+  computePrunedIDF(OrigVReg, DefMask, DefBlocks, OutIDFBlocks);
+  
+  // FIXME: Store in cache here
+  // IDFCache[Key] = OutIDFBlocks;
+}
 
-  // For same-block uses, check instruction order
-  if (UseMI->getParent() == DefMI->getParent()) {
+/// Check if a definition dominates a use.
+/// This is stricter than reachability - dominance means the def is on ALL paths to the use.
+///
+/// \param DefMI - The instruction defining a register
+/// \param UseMI - The instruction using a register
+/// \param UseOp - The specific use operand
+/// \returns true if DefMI dominates the use
+bool MachineLaneSSAUpdater::defDominatesUse(MachineInstr *DefMI,
+                                             MachineInstr *UseMI,
+                                             MachineOperand &UseOp) {
+  MachineBasicBlock *DefBlock = DefMI->getParent();
+  MachineBasicBlock *UseBlock = UseMI->getParent();
+  
+  // Fast path 1: Same block - check instruction order
+  if (UseBlock == DefBlock) {
     SlotIndex DefIdx = LIS.getInstructionIndex(*DefMI);
     SlotIndex UseIdx = LIS.getInstructionIndex(*UseMI);
     return DefIdx < UseIdx;
   }
   
-  // For cross-block uses, check block dominance
-  return MDT.dominates(DefMI->getParent(), UseMI->getParent());
+  // For PHI uses, we need to check dominance of the predecessor block
+  // For non-PHI uses, we check dominance of the use block
+  MachineBasicBlock *TargetBlock = UseBlock;
+  if (UseMI->isPHI()) {
+    unsigned OpIdx = UseMI->getOperandNo(&UseOp);
+    TargetBlock = UseMI->getOperand(OpIdx + 1).getMBB();
+  }
+  
+  return MDT.dominates(DefBlock, TargetBlock);
+}
+
+/// Check if a use is reachable from a definition using IDF analysis.
+///
+/// This fixes a bug where PHI operands from non-dominated predecessors were
+/// incorrectly left unrewritten after spills on parallel paths.
+bool MachineLaneSSAUpdater::isUseReachableFromDef(MachineOperand &DefOp,
+                                                    MachineOperand &UseOp,
+                                                    Register OrigVReg) {
+  // Extract information from operands
+  MachineInstr *DefMI = DefOp.getParent();
+  MachineInstr *UseMI = UseOp.getParent();
+  MachineBasicBlock *DefBlock = DefMI->getParent();
+  LaneBitmask DefMask = operandLaneMask(DefOp);
+  
+  // Fast path: Check dominance first
+  // If def dominates use, it definitely reaches it
+  if (defDominatesUse(DefMI, UseMI, UseOp)) {
+    return true;
+  }
+  
+  // Extract the target block for IDF analysis (use block or PHI predecessor)
+  MachineBasicBlock *PredBlock = UseMI->getParent();
+  if (UseMI->isPHI()) {
+    unsigned OpIdx = UseMI->getOperandNo(&UseOp);
+    PredBlock = UseMI->getOperand(OpIdx + 1).getMBB();
+  }
+  
+  // IDF-based reachability for non-dominated uses (parallel paths case)
+  //
+  // When a spill happens on one path but not all paths to a join point,
+  // we need PHI insertion. Example from spill-use-before-spill.mir:
+  //
+  //   bb.0.entry:
+  //     %0:vreg_128 = COPY ...
+  //     Branch to bb.1 or bb.2
+  //
+  //   bb.1.spill_path:
+  //     SI_SPILL_V128_SAVE %0  <- Spill here
+  //     %reload:vreg_128 = SI_SPILL_V128_RESTORE  <- Reload immediately
+  //     S_BRANCH %bb.3
+  //
+  //   bb.2.clean_path:
+  //     S_BRANCH %bb.3
+  //
+  //   bb.3.join:
+  //     S_ENDPGM 0, implicit %0  <- Needs PHI: one pred has reload, other has original!
+  //
+  // IDF analysis detects bb.3 is in the dominance frontier of bb.1,
+  // so the use in bb.3 IS reachable from the spill and needs PHI insertion.
+  
+  SmallVector<MachineBasicBlock *, 4> PrunedIDFBlocks;
+  SmallVector<MachineBasicBlock *, 1> DefBlocks = {DefBlock};
+  computePrunedIDF(OrigVReg, DefMask, DefBlocks, PrunedIDFBlocks);
+  
+  LLVM_DEBUG({
+    dbgs() << "  isUseReachableFromDef (slow path): DefBlock=bb." << DefBlock->getNumber()
+           << "." << DefBlock->getName() << " PredBlock=bb." << PredBlock->getNumber()
+           << "." << PredBlock->getName() << "\n";
+    dbgs() << "  Pruned IDF blocks: ";
+    for (auto *BB : PrunedIDFBlocks)
+      dbgs() << "bb." << BB->getNumber() << "." << BB->getName() << " ";
+    dbgs() << "\n";
+  });
+  
+  // Check if PredBlock is in or dominated by any IDF block
+  for (auto *IDFBB : PrunedIDFBlocks) {
+    if (IDFBB == PredBlock || MDT.dominates(IDFBB, PredBlock)) {
+      LLVM_DEBUG(dbgs() << "  => Reachable via IDF\n");
+      return true;
+    }
+  }
+  
+  LLVM_DEBUG(dbgs() << "  => NOT reachable\n");
+  return false;
+}
+
+/// During SSA reconstruction, check if a definition reaches a use.
+/// Uses IDF-based reachability analysis for correctness.
+///
+/// DefMI defines a NEW register (NewSSA), and UseOp uses the ORIGINAL register.
+/// We need to check if the definition of NewSSA can reach this use of OrigVReg.
+bool MachineLaneSSAUpdater::defReachesUse(MachineInstr *DefMI,
+                                           Register NewSSA,
+                                           MachineInstr *UseMI, 
+                                           MachineOperand &UseOp) {
+  Register OrigReg = UseOp.getReg();
+  assert(OrigReg.isVirtual() && "Expected virtual register");
+  assert(NewSSA.isVirtual() && "Expected virtual register");
+  
+  // Find the def operand in DefMI for NewSSA
+  MachineOperand *DefOp = DefMI->findRegisterDefOperand(NewSSA, &TRI, /*isDead=*/false, /*Overlap=*/true);
+  assert(DefOp && "DefMI must define NewSSA");
+  
+  // Use IDF-based reachability check
+  // Check if DefOp (NewSSA's definition) can reach UseOp (OrigReg's use)
+  return isUseReachableFromDef(*DefOp, UseOp, OrigReg);
 }
 
 /// What lanes does this operand read?
