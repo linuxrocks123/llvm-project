@@ -28,6 +28,7 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/Hashing.h"
 #include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineDominators.h"
@@ -297,12 +298,33 @@ void MachineLaneSSAUpdater::computePrunedIDF(Register OrigVReg,
                                               LaneBitmask DefMask,
                                               ArrayRef<MachineBasicBlock *> NewDefBlocks,
                                               SmallVectorImpl<MachineBasicBlock *> &OutIDFBlocks) {
-  LLVM_DEBUG(dbgs() << "MachineLaneSSAUpdater::computePrunedIDF VReg=" << OrigVReg 
+  const TargetRegisterInfo &TRI = *MF.getRegInfo().getTargetRegisterInfo();
+  LLVM_DEBUG(dbgs() << "MachineLaneSSAUpdater::computePrunedIDF VReg=" 
+                    << printReg(OrigVReg, &TRI)
                     << " DefMask=" << PrintLaneMask(DefMask)
                     << " with " << NewDefBlocks.size() << " new def blocks\n");
   
   // Clear output vector at entry
   OutIDFBlocks.clear();
+  
+  // Try cache for single-block definitions (most common case in spilling)
+  if (NewDefBlocks.size() == 1 && NewDefBlocks[0]) {
+    IDFCacheKey Key{OrigVReg, DefMask, static_cast<unsigned>(NewDefBlocks[0]->getNumber())};
+    auto It = IDFCache.find(Key);
+    if (It != IDFCache.end()) {
+      OutIDFBlocks.assign(It->second.begin(), It->second.end());
+      LLVM_DEBUG(dbgs() << "  IDF cache HIT for VReg=" << printReg(OrigVReg, &TRI)
+                        << " Mask=" << PrintLaneMask(DefMask)
+                        << " DefBlock=bb." << NewDefBlocks[0]->getNumber() 
+                        << "." << NewDefBlocks[0]->getName()
+                        << " -> " << OutIDFBlocks.size() << " IDF blocks\n");
+      return;
+    }
+    LLVM_DEBUG(dbgs() << "  IDF cache MISS for VReg=" << printReg(OrigVReg, &TRI)
+                      << " Mask=" << PrintLaneMask(DefMask)
+                      << " DefBlock=bb." << NewDefBlocks[0]->getNumber()
+                      << "." << NewDefBlocks[0]->getName() << "\n");
+  }
   
   // Early bail-out checks for robustness
   if (!OrigVReg.isVirtual()) {
@@ -383,6 +405,12 @@ void MachineLaneSSAUpdater::computePrunedIDF(Register OrigVReg,
   IDF.calculate(OutIDFBlocks);
   
   LLVM_DEBUG(dbgs() << "  Computed " << OutIDFBlocks.size() << " IDF blocks\n");
+  
+  // Store in cache if this was a single-block definition
+  if (NewDefBlocks.size() == 1 && NewDefBlocks[0]) {
+    IDFCacheKey Key{OrigVReg, DefMask, static_cast<unsigned>(NewDefBlocks[0]->getNumber())};
+    IDFCache[Key].assign(OutIDFBlocks.begin(), OutIDFBlocks.end());
+  }
   
   // Note: We do not place PHIs here; this function only computes candidate 
   // join blocks. The IDFCalculator handles deduplication automatically.
@@ -689,31 +717,13 @@ VNInfo *MachineLaneSSAUpdater::incomingOnEdge(LiveInterval &LI, MachineInstr *Ph
 
 /// Check if \p DefMI's definition reaches \p UseMI's use operand.
 /// Get pruned IDF blocks for a definition (public API).
-///
-/// FIXME: This currently recomputes IDF on every call. Add caching tomorrow:
-/// - Cache key: struct { Register VReg; LaneBitmask Mask; unsigned DefBlockNum; }
-/// - Cache storage: DenseMap<CacheKey, SmallVector<MachineBasicBlock*, 4>>
-/// - Return const reference to avoid copies
+/// Caching is handled inside computePrunedIDF.
 void MachineLaneSSAUpdater::getPrunedIDF(Register OrigVReg,
                                           LaneBitmask DefMask,
                                           MachineBasicBlock *DefBlock,
                                           SmallVectorImpl<MachineBasicBlock *> &OutIDFBlocks) {
-  OutIDFBlocks.clear();
-  
-  // FIXME: Check cache here
-  // IDFCacheKey Key{OrigVReg, DefMask, DefBlock->getNumber()};
-  // auto It = IDFCache.find(Key);
-  // if (It != IDFCache.end()) {
-  //   OutIDFBlocks = It->second;  // Or return const& to avoid copy
-  //   return;
-  // }
-  
-  // Compute IDF (will be cached tomorrow)
   SmallVector<MachineBasicBlock *, 1> DefBlocks = {DefBlock};
   computePrunedIDF(OrigVReg, DefMask, DefBlocks, OutIDFBlocks);
-  
-  // FIXME: Store in cache here
-  // IDFCache[Key] = OutIDFBlocks;
 }
 
 /// Check if a definition dominates a use.

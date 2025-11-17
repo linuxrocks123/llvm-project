@@ -93,13 +93,11 @@ public:
                              MachineOperand &UseOp,
                              Register OrigVReg);
 
-  /// Get pruned IDF blocks for a definition.
+  /// Get pruned IDF blocks for a definition (with caching).
   /// 
   /// Computes the Iterated Dominance Frontier (IDF) for DefBlock, pruned by
   /// LiveInterval analysis (only includes blocks where OrigVReg lanes are live-in).
-  ///
-  /// FIXME: Add caching to avoid recomputation. Cache key: (VReg, Mask, DefBlockNumber)
-  /// FIXME: Return const reference to cached result to avoid copies
+  /// Results are cached to avoid redundant computation.
   ///
   /// \param OrigVReg - The register to analyze
   /// \param DefMask - Lane mask of the definition
@@ -109,6 +107,20 @@ public:
                     LaneBitmask DefMask,
                     MachineBasicBlock *DefBlock,
                     SmallVectorImpl<MachineBasicBlock *> &OutIDFBlocks);
+
+  /// Clear the IDF cache. Call this if the CFG is modified.
+  void clearIDFCache() { IDFCache.clear(); }
+
+  // Public cache key structure for DenseMapInfo specialization
+  struct IDFCacheKey {
+    Register VReg;
+    LaneBitmask Mask;
+    unsigned DefBlockNum;
+    
+    bool operator==(const IDFCacheKey &Other) const {
+      return VReg == Other.VReg && Mask == Other.Mask && DefBlockNum == Other.DefBlockNum;
+    }
+  };
 
 private:
   // Common SSA repair logic
@@ -159,6 +171,9 @@ private:
   void rewriteDominatedUses(Register OrigVReg,
                             Register NewSSA,
                             LaneBitmask MaskToRewrite);
+
+  // Cache for IDF computations to avoid redundant calculations
+  DenseMap<IDFCacheKey, SmallVector<MachineBasicBlock *, 4>> IDFCache;
 
   // Internal helper methods for use rewriting
   VNInfo *incomingOnEdge(LiveInterval &LI, MachineInstr *Phi, MachineOperand &PhiOp);
@@ -220,6 +235,28 @@ struct DenseMapInfo<LaneBitmask> {
   }
   
   static bool isEqual(const LaneBitmask &LHS, const LaneBitmask &RHS) {
+    return LHS == RHS;
+  }
+};
+
+// DenseMapInfo specialization for MachineLaneSSAUpdater::IDFCacheKey
+template <>
+struct DenseMapInfo<MachineLaneSSAUpdater::IDFCacheKey> {
+  using Key = MachineLaneSSAUpdater::IDFCacheKey;
+  
+  static inline Key getEmptyKey() {
+    return Key{Register(), LaneBitmask::getAll(), ~0U};
+  }
+  
+  static inline Key getTombstoneKey() {
+    return Key{Register(), LaneBitmask::getNone(), ~0U - 1};
+  }
+  
+  static unsigned getHashValue(const Key &K) {
+    return hash_combine(K.VReg.id(), K.Mask.getAsInteger(), K.DefBlockNum);
+  }
+  
+  static bool isEqual(const Key &LHS, const Key &RHS) {
     return LHS == RHS;
   }
 };
