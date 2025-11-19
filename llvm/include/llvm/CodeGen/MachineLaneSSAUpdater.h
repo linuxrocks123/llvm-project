@@ -75,13 +75,23 @@ public:
 
   /// Check if a use is reachable from a definition using IDF analysis.
   /// 
-  /// Extracts DefMI, DefBlock, DefMask from DefOp and UseMI from UseOp.
-  /// 
   /// Fast paths:
   /// - Same block: check instruction order
   /// - Non-PHI uses: check block dominance
   /// - PHI with dominated predecessor: return true
   ///
+  /// \param DefMI - The instruction that defines/uses the register
+  /// \param UseMI - The instruction that uses the register
+  /// \param OrigVReg - The original register being analyzed
+  /// \param DefMask - The lane mask for the definition (used for IDF analysis)
+  /// \returns true if UseMI is reachable from DefMI
+  // TODO: Make VRegMaskPair.h public and change signature to use VRegMaskPair
+  // instead of Register and LaneBitmask separately
+  bool isUseReachableFromDef(MachineInstr *DefMI, MachineInstr *UseMI,
+                             Register OrigVReg, LaneBitmask DefMask);
+
+  /// Check if a use is reachable from a definition.
+  /// Fast path (dominated use): Simple dominance check
   /// Slow path (PHI with non-dominated predecessor):
   /// Uses pruned IDF to determine reachability
   ///

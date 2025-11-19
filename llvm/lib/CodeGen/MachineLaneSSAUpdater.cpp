@@ -761,25 +761,26 @@ bool MachineLaneSSAUpdater::defDominatesUse(MachineInstr *DefMI,
 ///
 /// This fixes a bug where PHI operands from non-dominated predecessors were
 /// incorrectly left unrewritten after spills on parallel paths.
-bool MachineLaneSSAUpdater::isUseReachableFromDef(MachineOperand &DefOp,
-                                                    MachineOperand &UseOp,
-                                                    Register OrigVReg) {
-  // Extract information from operands
-  MachineInstr *DefMI = DefOp.getParent();
-  MachineInstr *UseMI = UseOp.getParent();
+bool MachineLaneSSAUpdater::isUseReachableFromDef(MachineInstr *DefMI,
+                                                    MachineInstr *UseMI,
+                                                    Register OrigVReg,
+                                                    LaneBitmask DefMask) {
   MachineBasicBlock *DefBlock = DefMI->getParent();
-  LaneBitmask DefMask = operandLaneMask(DefOp);
+  
+  // Find the use operand in UseMI for dominance check
+  MachineOperand *UseOp = UseMI->findRegisterUseOperand(OrigVReg, &TRI, /*isKill=*/false);
+  assert(UseOp && "UseMI must use OrigVReg");
   
   // Fast path: Check dominance first
   // If def dominates use, it definitely reaches it
-  if (defDominatesUse(DefMI, UseMI, UseOp)) {
+  if (defDominatesUse(DefMI, UseMI, *UseOp)) {
     return true;
   }
   
   // Extract the target block for IDF analysis (use block or PHI predecessor)
   MachineBasicBlock *PredBlock = UseMI->getParent();
   if (UseMI->isPHI()) {
-    unsigned OpIdx = UseMI->getOperandNo(&UseOp);
+    unsigned OpIdx = UseMI->getOperandNo(UseOp);
     PredBlock = UseMI->getOperand(OpIdx + 1).getMBB();
   }
   
@@ -830,6 +831,16 @@ bool MachineLaneSSAUpdater::isUseReachableFromDef(MachineOperand &DefOp,
   
   LLVM_DEBUG(dbgs() << "  => NOT reachable\n");
   return false;
+}
+
+bool MachineLaneSSAUpdater::isUseReachableFromDef(MachineOperand &DefOp,
+                                                    MachineOperand &UseOp,
+                                                    Register OrigVReg) {
+  // Derive instructions and lane mask from operands and call the MachineInstr* version
+  MachineInstr *DefMI = DefOp.getParent();
+  MachineInstr *UseMI = UseOp.getParent();
+  LaneBitmask DefMask = operandLaneMask(DefOp);
+  return isUseReachableFromDef(DefMI, UseMI, OrigVReg, DefMask);
 }
 
 /// During SSA reconstruction, check if a definition reaches a use.

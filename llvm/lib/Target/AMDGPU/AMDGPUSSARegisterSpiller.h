@@ -33,6 +33,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Register.h"
 #include "llvm/CodeGen/SlotIndexes.h"
+#include "llvm/ADT/DenseSet.h"
 
 namespace llvm {
 
@@ -77,6 +78,11 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
 
   // Stack slot management
   DenseMap<VRegMaskPair, int> Virt2StackSlotMap;
+
+  // Track registers that have been stored at definition (to avoid EXEC drift)
+  // When a register is selected for spilling, we store it right after definition
+  // (when EXEC is full), then mark it dead at the "real spill" point using pruneValue()
+  DenseSet<VRegMaskPair> StoredAtDefinition;
 
   // Divergent path handling: Maps spill instruction to reload instruction
   // for reachable but not dominated uses (divergent paths)
@@ -152,8 +158,13 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
                       VRegMaskPairSet &Active, unsigned CurRP,
                       unsigned RPLimit);
 
-  /// Emits a spill instruction before the given position (forward iterator).
-  /// This is the primary spill method used during SSA repair.
+  /// Stores register to stack slot right after its definition (when EXEC is full).
+  /// This avoids EXEC drift issues by ensuring all lanes are stored before any
+  /// divergent control flow can modify EXEC. Returns the store instruction.
+  MachineInstr *spillAtDefinition(VRegMaskPair VMP);
+
+  /// If the register was already stored at definition, uses pruneValue() to mark
+  /// it dead at this point instead of emitting a new store.
   void spillBefore(MachineBasicBlock &MBB,
                    MachineBasicBlock::iterator InsertBefore, VRegMaskPair VMP);
 
@@ -201,8 +212,8 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   /// NOTE: We only optimize placement for dominated uses. MachineLaneSSAUpdater
   /// automatically handles all SSA repair including PHI insertion for reachable
   /// uses, so we don't need to manually compute IDF or classify uses.
-  void emitReloadsAndRepairSSA(VRegMaskPair SpilledVMP, MachineInstr *SpillMI,
-                               int FrameIndex, MachineInstr *TriggeringMI);
+  void emitReloadsAndRepairSSA(VRegMaskPair SpilledVMP, SlotIndex KillIdx,
+                               int FrameIndex);
 
   /// Debug helper: dumps a register set to dbgs().
   void dumpRegSet(const VRegMaskPairSet &Regs) const;
@@ -210,18 +221,6 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   // ============================================================================
   // Divergent Path Optimization Helpers
   // ============================================================================
-  
-  /// Returns true if the instruction writes to EXEC register or branches on VCC
-  bool isDivergentInstr(const MachineInstr *MI) const;
-  
-  /// Returns true if any path from StartBB to StopInstr contains EXEC write or VCC branch
-  /// StopInstr: stop checking at this instruction (exclusive)
-  bool pathHasDivergence(MachineBasicBlock *StartBB, MachineInstr *StopInstr) const;
-  
-  /// Optimized check for diamond CFG: returns true if any path from NCD to either
-  /// SpillMI or UseMI contains divergent instruction. Uses single DFS with shared visited set.
-  bool pathsHaveDivergence(MachineBasicBlock *NCD, MachineInstr *SpillMI, 
-                           MachineInstr *UseMI) const;
   
   /// Returns true if SpilledVMP has any uses on the path from StartBB to EndBB
   /// StopInstr: if provided, stop checking at this instruction in EndBB (exclusive)
@@ -234,30 +233,23 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   
   /// Attempts to hoist spill to NCD if no uses exist on either path
   /// Returns true if hoisting was performed
-  bool tryHoistSpillToNCD(MachineInstr *SpillMI, VRegMaskPair SpilledVMP,
+  bool tryHoistSpillToNCD(MachineInstr *KillMI, VRegMaskPair SpilledVMP,
                           const SmallVectorImpl<MachineInstr *> &ReachableUses);
   
   /// Splits the join block at the reload point, placing reload on spill-path edge only.
   /// This ensures the reload executes only when arriving from the spill path, not the clean path.
   /// MachineLaneSSAUpdater will automatically insert PHI at the merge point.
+  /// JoinBB is computed directly from CFG structure (no IDF needed).
   /// Returns the reload instruction in the split block (same ReloadMI pointer, but in new block).
-  MachineInstr* splitBlockBeforeReload(MachineInstr *SpillMI, 
+  MachineInstr* splitBlockBeforeReload(MachineInstr *KillMI, 
                                        MachineInstr *ReloadMI, 
-                                       VRegMaskPair SpilledVMP,
-                                       const SmallVectorImpl<MachineBasicBlock *> &IDFBlocks);
+                                       VRegMaskPair SpilledVMP);
   
-  /// Handles uniform (no EXEC write) reachable uses via split-before-use
-  void handleUniformReachableUse(MachineInstr *SpillMI, MachineInstr *ReloadMI,
-                                  VRegMaskPair SpilledVMP,
-                                  const SmallVectorImpl<MachineBasicBlock *> &IDFBlocks);
-  
-  /// Handles divergent (EXEC write exists) reachable uses via WWM or EWF
-  void handleDivergentReachableUse(MachineInstr *SpillMI, MachineInstr *ReloadMI,
-                                    VRegMaskPair SpilledVMP,
-                                    const SmallVectorImpl<MachineBasicBlock *> &IDFBlocks);
-  
-  /// Wraps spill/reload with WWM (Whole Wave Mode) - saves/restores EXEC
-  void wrapWithWWM(MachineInstr *SpillMI, MachineInstr *ReloadMI);
+  /// Handles reachable but not dominated uses via split-before-use.
+  /// With "store at definition", spills are correct (all lanes stored), so we only
+  /// need to handle reload placement. No WWM needed since we store the same mask as defined.
+  void handleReachableUse(MachineInstr *KillMI, MachineInstr *ReloadMI,
+                          VRegMaskPair SpilledVMP);
 
 public:
   static char ID;

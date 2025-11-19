@@ -574,31 +574,35 @@ bool AMDGPUSSARegisterSpiller::spillAndReload(
       dbgs() << " with mask " << PrintLaneMask(Mask) << "\n";
     });
 
-    // Step 2a: Emit spill instruction
-    spillBefore(MBB, I, VMP);
+    // Step 2a: Store register at definition point (when EXEC is full)
+    // This avoids EXEC drift issues by ensuring all lanes are stored before
+    // any divergent control flow can modify EXEC
+    MachineInstr *DefStoreMI = spillAtDefinition(VMP);
+    assert(DefStoreMI && "Virtual register must have a definition in SSA form");
     
-    // Get the spill instruction we just emitted
+    // Step 2b: Set virtual "spill point" at the high-pressure point
+    // This is where RP exceeded, but we don't prune the LiveInterval here.
+    // The LiveInterval will be shrunk later by shrinkToUses() after all reloads are placed.
     MachineBasicBlock::iterator SpillPos = I.getReverse();
-    MachineInstr *SpillMI = &*std::prev(SpillPos);
     
-    LLVM_DEBUG(dbgs() << "spillAndReload(): Emitted spill: " << *SpillMI);
+    SlotIndex KillIdx;
+    if (SpillPos == MBB.begin()) {
+      KillIdx = Indexes->getMBBStartIdx(&MBB);
+    } else {
+      KillIdx = Indexes->getInstructionIndex(*SpillPos).getBaseIndex();
+    }
     
-    // Step 2b: Get stack slot for reload phase
+    LLVM_DEBUG({
+      dbgs() << "spillAndReload(): Virtual spill point (KillIdx): " << KillIdx << "\n";
+    });
+    
+    // Step 2c: Get stack slot for reload phase
     int FI = assignVirt2StackSlot(VMP);
     
-    // Step 2c: Emit reloads for dominated uses and repair SSA
-    // TODO: Implement emitReloadsAndRepairSSA()
-    // This should:
-    // 1. Find all uses dominated by SpillMI
-    // 2. Group dominated uses by dominance chains (DomGroup)
-    // 3. Emit one reload per group at the group head
-    // 4. Call MachineLaneSSAUpdater::repairSSAForNewDef() which will:
-    //    - Handle all non-dominated uses
-    //    - Insert PHIs where needed (using IDF internally)
-    //    - Rewrite all uses appropriately
-    
-    // Step 2c: Emit reloads for dominated uses and repair SSA
-    emitReloadsAndRepairSSA(VMP, SpillMI, FI, &*I);
+    // Step 2d: Emit reloads for dominated uses and repair SSA
+    // We use KillIdx as the reference point for reload placement
+    // shrinkToUses() will be called at the end of emitReloadsAndRepairSSA()
+    emitReloadsAndRepairSSA(VMP, KillIdx, FI);
   }
 
   LLVM_DEBUG(dbgs() << "spillAndReload(): Completed, spilled " 
@@ -609,11 +613,14 @@ bool AMDGPUSSARegisterSpiller::spillAndReload(
 }
 
 void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
-    VRegMaskPair SpilledVMP, MachineInstr *SpillMI, int FrameIndex,
-    MachineInstr *TriggeringMI) {
+    VRegMaskPair SpilledVMP, SlotIndex KillIdx, int FrameIndex) {
   
   Register SpilledReg = SpilledVMP.getVReg();
   LaneBitmask SpilledMask = SpilledVMP.getLaneMask();
+  
+  // Get the instruction at KillIdx for dominance/reachability checks
+  MachineInstr *KillMI = Indexes->getInstructionFromIndex(KillIdx);
+  assert(KillMI && "KillIdx must correspond to an instruction");
   
   LLVM_DEBUG({
     dbgs() << "\n=== emitReloadsAndRepairSSA() ===\n";
@@ -624,7 +631,8 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
     else
       dbgs() << printReg(SpilledReg, TRI);
     dbgs() << " with mask " << PrintLaneMask(SpilledMask) << "\n";
-    dbgs() << "SpillMI: " << *SpillMI;
+    dbgs() << "KillIdx: " << KillIdx << "\n";
+    dbgs() << "KillMI: " << *KillMI;
   });
 
   // Step 1: Classify uses into dominated and non-dominated
@@ -633,16 +641,6 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
   SmallVector<MachineInstr *> NonDominatedUses;
   
   for (MachineInstr &UseMI : MRI->use_nodbg_instructions(SpilledReg)) {
-    // Skip the spill instruction itself
-    if (&UseMI == SpillMI)
-      continue;
-    
-    // Skip the triggering instruction (that caused the spill)
-    // This instruction's operands are live BEFORE it executes, so the spill
-    // happens BEFORE this instruction reads the register. We should NOT
-    // consider this a dominated use requiring reload.
-    if (&UseMI == TriggeringMI)
-      continue;
     
     // Skip other spill instructions (they're not "real" uses we want to reload for)
     // This primarily handles previous spills of overlapping subregisters.
@@ -686,7 +684,7 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
       continue;
     
     // Classify: dominated or not
-    if (DT->dominates(SpillMI, &UseMI)) {
+    if (DT->dominates(KillMI, &UseMI)) {
       DominatedUses.push_back(&UseMI);
       LLVM_DEBUG(dbgs() << "  Dominated use: " << UseMI);
     } else {
@@ -701,20 +699,16 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
   if (!NonDominatedUses.empty()) {
     // Use class member SSA updater (caches IDF computations across calls)
     
-    // Find the spill use operand (spill stores the register, so it's a use)
-    // We treat this as the "def point" for reachability - after this point,
-    // the value is spilled and no longer available in registers
-    MachineOperand *SpillUseOp = SpillMI->findRegisterUseOperand(SpilledReg, TRI, /*isKill=*/false);
-    assert(SpillUseOp && "Spill must use the register");
-    
     for (MachineInstr *UseMI : NonDominatedUses) {
       // Find any use operand for the spilled register
       if (MachineOperand *UseOp = UseMI->findRegisterUseOperand(SpilledReg, TRI, /*isKill=*/false)) {
         // Check if this use overlaps with spilled lanes
         VRegMaskPair UseVMP(*UseOp, TRI, MRI);
         if (UseVMP.overlaps(SpilledVMP)) {
-          // Use SSA updater's IDF-based reachability check (with caching)
-          if (SSAUpdater->isUseReachableFromDef(*SpillUseOp, *UseOp, SpilledReg)) {
+          // Use new overload that takes MachineInstr* instead of MachineOperand*
+          // Pass SpilledVMP.getLaneMask() since KillMI doesn't define/use SpilledReg
+          if (SSAUpdater->isUseReachableFromDef(KillMI, UseMI, SpilledReg,
+                                                SpilledVMP.getLaneMask())) {
             ReachableUses.push_back(UseMI);
             LLVM_DEBUG(dbgs() << "  Classified as reachable: " << *UseMI);
           } else {
@@ -803,13 +797,13 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
                       << " use(s) in this group will be rewritten by SSA updater\n");
   }
   
-  // Step 4: Handle reachable but not dominated uses (divergent paths)
+  // Step 4: Handle reachable but not dominated uses
   if (!ReachableUses.empty()) {
     LLVM_DEBUG(dbgs() << "\n=== Handling " << ReachableUses.size() 
-                      << " reachable (divergent path) uses ===\n");
+                      << " reachable (non-dominated) uses ===\n");
     
     // Step 4a: Try to hoist spill to NCD if no uses on either path
-    bool Hoisted = tryHoistSpillToNCD(SpillMI, SpilledVMP, ReachableUses);
+    bool Hoisted = tryHoistSpillToNCD(KillMI, SpilledVMP, ReachableUses);
     
     if (Hoisted) {
       LLVM_DEBUG(dbgs() << "  Spill hoisted to NCD, uses now dominated\n");
@@ -819,7 +813,7 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
       return;
     }
     
-    // Step 4b: Hoisting impossible, classify and handle each use
+    // Step 4b: Hoisting impossible, handle each use with split-before-use
     for (MachineInstr *UseMI : ReachableUses) {
       // Check if this use was already rewritten by SSA repair
       // Can happen from: (1) dominated use SSA repair, or (2) previous reachable use SSA repair
@@ -833,36 +827,9 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
       // Emit reload instruction (no SSA repair yet - will be done after CFG transform)
       MachineInstr *ReloadMI = emitReload(UseMI->getIterator(), SpilledVMP);
       
-      MachineBasicBlock *UseBB = UseMI->getParent();
-      
-      // Classify as uniform or divergent:
-      // Uniform iff BOTH paths are non-divergent:
-      //   1. NCD(Spill,Use) → SpillMI has no EXEC write or VCC branch
-      //   2. NCD(Spill,Use) → UseMI has no EXEC write or VCC branch
-      // Use optimized single-DFS check for diamond CFG
-      
-      MachineBasicBlock *SpillBB = SpillMI->getParent();
-      MachineBasicBlock *NCD = DT->findNearestCommonDominator(SpillBB, UseBB);
-      
-      // Single DFS checking both paths simultaneously
-      bool IsDivergent = pathsHaveDivergence(NCD, SpillMI, UseMI);
-      
-      LLVM_DEBUG({
-        dbgs() << "    NCD: " << printMBBReference(*NCD) << "\n";
-        dbgs() << "    Classification: " << (IsDivergent ? "DIVERGENT" : "UNIFORM") << "\n";
-      });
-      
-      // Get cached IDF blocks for WWM wrapping (computed during reachability check)
-      SmallVector<MachineBasicBlock *, 4> PrunedIDFBlocks;
-      SSAUpdater->getPrunedIDF(SpilledReg, SpilledMask, SpillMI->getParent(), PrunedIDFBlocks);
-      
-      if (IsDivergent) {
-        // Divergent: EXEC/VCC changes between NCD and spill/use
-        handleDivergentReachableUse(SpillMI, ReloadMI, SpilledVMP, PrunedIDFBlocks);
-      } else {
-        // Uniform: EXEC/VCC stable on both paths
-        handleUniformReachableUse(SpillMI, ReloadMI, SpilledVMP, PrunedIDFBlocks);
-      }
+      // Handle with split-before-use
+      // With "store at definition", we store the same mask as defined, so no WWM needed
+      // handleReachableUse(KillMI, ReloadMI, SpilledVMP);
       
       // Now repair SSA with the transformed CFG
       Register NewVReg = repairSSAForReload(ReloadMI, SpilledVMP);
@@ -871,7 +838,7 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
                         << getRegNameForDebug(NewVReg, MRI, TRI) << "\n");
       
       // Store spill->reload mapping for potential future optimization
-      SpillToReloadMap[SpillMI].push_back(ReloadMI);
+      SpillToReloadMap[KillMI].push_back(ReloadMI);
     }
     
     LLVM_DEBUG(dbgs() << "  Processed " << ReachableUses.size() 
@@ -895,12 +862,160 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
 // Primary spill/reload methods (forward iterators) - used for SSA repair
 // ============================================================================
 
+MachineInstr *AMDGPUSSARegisterSpiller::spillAtDefinition(VRegMaskPair VMP) {
+  Register VReg = VMP.getVReg();
+  LaneBitmask Mask = VMP.getLaneMask();
+  
+  LLVM_DEBUG({
+    StringRef Name = MRI->getVRegName(VReg);
+    dbgs() << "spillAtDefinition(): Storing ";
+    if (!Name.empty())
+      dbgs() << "%" << Name;
+    else
+      dbgs() << printReg(VReg, TRI);
+    dbgs() << " with mask " << PrintLaneMask(Mask) << " right after definition\n";
+  });
+
+  // Find the definition point
+  MachineInstr *DefMI = MRI->getVRegDef(VReg);
+  if (!DefMI) {
+    LLVM_DEBUG(dbgs() << "spillAtDefinition(): No definition found (live-in?)\n");
+    return nullptr;
+  }
+
+  MachineBasicBlock *DefMBB = DefMI->getParent();
+  MachineBasicBlock::iterator InsertAfter = std::next(DefMI->getIterator());
+
+  // Get or create stack slot
+  int FI = assignVirt2StackSlot(VMP);
+
+  // Determine SubRegIdx from lane mask
+  unsigned SubRegIdx = VMP.getSubReg(MRI, TRI);
+  
+  // Get the appropriate register class
+  const TargetRegisterClass *RC =
+      (SubRegIdx == AMDGPU::NoRegister)
+          ? TRI->getRegClassForReg(*MRI, VReg)
+          : TRI->getSubRegisterClass(TRI->getRegClassForReg(*MRI, VReg),
+                                     SubRegIdx);
+
+  LLVM_DEBUG({
+    if (SubRegIdx != AMDGPU::NoRegister) {
+      StringRef Name = MRI->getVRegName(VReg);
+      dbgs() << "spillAtDefinition(): Storing subregister "
+             << TRI->getSubRegIndexName(SubRegIdx) << " of ";
+      if (!Name.empty())
+        dbgs() << "%" << Name;
+      else
+        dbgs() << printReg(VReg, TRI);
+      dbgs() << "\n";
+    }
+  });
+
+  // Emit the store instruction right after definition with isKill=false
+  // This ensures all lanes are stored when EXEC is full
+  TII->storeRegToStackSlot(*DefMBB, InsertAfter, VReg, /*isKill=*/false, FI, RC,
+                           TRI, VReg, MachineInstr::NoFlags, SubRegIdx);
+
+  // Get the inserted store instruction
+  MachineInstr &StoreMI = *std::prev(InsertAfter);
+  
+  // Update LiveIntervals
+  LIS->InsertMachineInstrInMaps(StoreMI);
+
+  // Mark this register as stored at definition
+  StoredAtDefinition.insert(VMP);
+
+  LLVM_DEBUG(dbgs() << "spillAtDefinition(): Stored: " << StoreMI);
+  ++NumSpills;
+
+  return &StoreMI;
+}
+
 void AMDGPUSSARegisterSpiller::spillBefore(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator InsertBefore,
                                            VRegMaskPair VMP) {
   Register VReg = VMP.getVReg();
   LaneBitmask Mask = VMP.getLaneMask();
   
+  // Check if this register was already stored at definition
+  if (StoredAtDefinition.count(VMP)) {
+    LLVM_DEBUG({
+      StringRef Name = MRI->getVRegName(VReg);
+      dbgs() << "spillBefore(): Register ";
+      if (!Name.empty())
+        dbgs() << "%" << Name;
+      else
+        dbgs() << printReg(VReg, TRI);
+      dbgs() << " already stored at definition, marking dead at real spill point\n";
+    });
+
+    // Get the SlotIndex for the "real spill" point (right before InsertBefore)
+    SlotIndex KillIdx;
+    if (InsertBefore == MBB.begin()) {
+      // InsertBefore is at block start, use block start index
+      KillIdx = Indexes->getMBBStartIdx(&MBB);
+    } else {
+      // InsertBefore points to an instruction, mark dead at its base index
+      // (right before it executes)
+      KillIdx = Indexes->getInstructionIndex(*InsertBefore).getBaseIndex();
+    }
+
+    // Prune the LiveInterval to mark register dead at this point
+    if (LIS->hasInterval(VReg)) {
+      LiveInterval &LI = LIS->getInterval(VReg);
+      
+      // Prune the main live range (cast LiveInterval to LiveRange*)
+      LIS->pruneValue(*static_cast<LiveRange *>(&LI), KillIdx, nullptr);
+      
+      // Prune all subranges as well
+      for (LiveInterval::SubRange &SR : LI.subranges()) {
+        LIS->pruneValue(SR, KillIdx, nullptr);
+      }
+      
+      // TEMPORARY DEBUG: Dump %0's LiveInterval AFTER pruning and compare with %2
+      LLVM_DEBUG({
+        if (InsertBefore != MBB.begin()) {
+          dbgs() << "spillBefore(): %0 LiveInterval AFTER pruning: " << LI << "\n";
+          
+          // Find %2 again and check if %0 dies before %2 becomes live
+          MachineInstr *DefMI = &*InsertBefore;
+          Register VReg2;
+          for (const MachineOperand &MO : DefMI->operands()) {
+            if (MO.isReg() && MO.isDef() && MO.getReg().isVirtual()) {
+              VReg2 = MO.getReg();
+              break;
+            }
+          }
+          
+          if (VReg2.isValid() && LIS->hasInterval(VReg2)) {
+            LiveInterval &LI2 = LIS->getInterval(VReg2);
+            SlotIndex Def2Idx = Indexes->getInstructionIndex(*DefMI).getRegSlot();
+            
+            // Check if %2 is live at KillIdx (where %0 dies)
+            LiveQueryResult LRQ2 = LI2.Query(KillIdx);
+            bool VReg2LiveAtKill = (LRQ2.valueIn() != nullptr);
+            
+            dbgs() << "spillBefore(): %2 defined at: " << Def2Idx << "\n";
+            dbgs() << "spillBefore(): %0 dies at: " << KillIdx << "\n";
+            dbgs() << "spillBefore(): %2 live at KillIdx (" << KillIdx << "): " 
+                   << (VReg2LiveAtKill ? "YES" : "NO") << "\n";
+            
+            if (VReg2LiveAtKill && Def2Idx >= KillIdx) {
+              dbgs() << "spillBefore(): WARNING: %0 dies BEFORE %2 becomes live!\n";
+            } else {
+              dbgs() << "spillBefore(): OK: %0 dies after %2 becomes live or %2 not live yet\n";
+            }
+          }
+        }
+      });
+    }
+
+    LLVM_DEBUG(dbgs() << "spillBefore(): Pruned LiveInterval at " << KillIdx << "\n");
+    return;
+  }
+
+  // Original behavior: emit spill instruction
   LLVM_DEBUG({
     StringRef Name = MRI->getVRegName(VReg);
     dbgs() << "spillBefore(): Emitting spill for ";
@@ -1158,121 +1273,6 @@ bool AMDGPUSSARegisterSpiller::usesSpilledVMP(const MachineInstr *MI,
   return false;
 }
 
-bool AMDGPUSSARegisterSpiller::isDivergentInstr(const MachineInstr *MI) const {
-  // Check for EXEC modifications
-  if (MI->modifiesRegister(AMDGPU::EXEC, TRI) || 
-      MI->modifiesRegister(AMDGPU::EXEC_LO, TRI))
-    return true;
-  
-  // Check for VCC branches (vector conditional branches cause divergence)
-  // VCC branches are typically S_CBRANCH_VCCZ, S_CBRANCH_VCCNZ
-  if (MI->isBranch()) {
-    for (const MachineOperand &MO : MI->uses()) {
-      if (MO.isReg() && 
-          (MO.getReg() == AMDGPU::VCC || 
-           MO.getReg() == AMDGPU::VCC_LO ||
-           MO.getReg().isVirtual())) {
-        // Conservatively assume virtual register branches could be VCC-based
-        return true;
-      }
-    }
-  }
-  
-  return false;
-}
-
-bool AMDGPUSSARegisterSpiller::pathHasDivergence(
-    MachineBasicBlock *StartBB, MachineInstr *StopInstr) const {
-  
-  // TODO: Implement caching - store results in DenseMap<(BB, Instr), bool>
-  // to avoid redundant DFS traversals for the same queries
-  
-  // NOTE: StartBB is EXCLUDED from the search (we start from its successors)
-  // This is used when StartBB is NCD - we check from NCD's exit to StopInstr
-  
-  MachineBasicBlock *EndBB = StopInstr->getParent();
-  
-  // DFS from StartBB's successors to StopInstr, checking for divergence
-  SmallPtrSet<MachineBasicBlock *, 8> Visited;
-  SmallVector<MachineBasicBlock *, 8> Worklist(StartBB->successors());
-  
-  while (!Worklist.empty()) {
-    MachineBasicBlock *BB = Worklist.pop_back_val();
-    
-    if (!Visited.insert(BB).second)
-      continue;
-      
-    // Check instructions in this block
-    // If this is EndBB, only check up to StopInstr
-    auto EndIt = (BB == EndBB) ? StopInstr->getIterator() : BB->end();
-    
-    for (auto I = BB->begin(), E = EndIt; I != E; ++I) {
-      if (isDivergentInstr(&*I)) {
-        LLVM_DEBUG(dbgs() << "  Found divergent instruction on path: " << *I);
-        return true;
-      }
-    }
-    
-    // If we reached the end block, stop
-    if (BB == EndBB)
-      continue;
-      
-    // Continue to successors
-    for (MachineBasicBlock *Succ : BB->successors()) {
-      if (!Visited.count(Succ))
-        Worklist.push_back(Succ);
-    }
-  }
-  
-  return false;
-}
-
-bool AMDGPUSSARegisterSpiller::pathsHaveDivergence(
-    MachineBasicBlock *NCD, MachineInstr *SpillMI, MachineInstr *UseMI) const {
-  
-  // Check if any path from NCD to UseMI contains divergent instruction.
-  // SpillMI is just context - we're checking if reload path has divergence.
-  // Single DFS from NCD to UseMI with shared visited set for efficiency.
-  
-  (void)SpillMI; // Unused - just for context/symmetry in API
-  MachineBasicBlock *UseBB = UseMI->getParent();
-  
-  // DFS from NCD's successors, checking all paths until we reach UseMI
-  SmallPtrSet<MachineBasicBlock *, 8> Visited;
-  SmallVector<MachineBasicBlock *, 8> Worklist(NCD->successors());
-  
-  while (!Worklist.empty()) {
-    MachineBasicBlock *BB = Worklist.pop_back_val();
-    
-    if (!Visited.insert(BB).second)
-      continue;
-      
-    // Determine iteration bounds for this block
-    // If this is UseBB, only check up to UseMI (exclusive)
-    auto EndIt = (BB == UseBB) ? UseMI->getIterator() : BB->end();
-    
-    // Check for divergent instructions in this block
-    for (auto I = BB->begin(), E = EndIt; I != E; ++I) {
-      if (isDivergentInstr(&*I)) {
-        LLVM_DEBUG(dbgs() << "  Found divergent instruction on path: " << *I);
-        return true;
-      }
-    }
-    
-    // Stop exploring if we reached UseMI
-    if (BB == UseBB)
-      continue;
-      
-    // Continue to successors
-    for (MachineBasicBlock *Succ : BB->successors()) {
-      if (!Visited.count(Succ))
-        Worklist.push_back(Succ);
-    }
-  }
-  
-  return false;
-}
-
 bool AMDGPUSSARegisterSpiller::hasUseOnPath(
     MachineBasicBlock *StartBB, MachineBasicBlock *EndBB, 
     VRegMaskPair SpilledVMP, MachineInstr *StopInstr) const {
@@ -1334,16 +1334,16 @@ bool AMDGPUSSARegisterSpiller::hasUseOnPath(
 }
 
 bool AMDGPUSSARegisterSpiller::tryHoistSpillToNCD(
-    MachineInstr *SpillMI, VRegMaskPair SpilledVMP,
+    MachineInstr *KillMI, VRegMaskPair SpilledVMP,
     const SmallVectorImpl<MachineInstr *> &ReachableUses) {
   
   if (ReachableUses.empty())
     return false;
     
-  MachineBasicBlock *SpillBB = SpillMI->getParent();
+  MachineBasicBlock *KillBB = KillMI->getParent();
   
-  // Find nearest common dominator (NCD) of spill and all reachable uses
-  MachineBasicBlock *NCD = SpillBB;
+  // Find nearest common dominator (NCD) of kill point and all reachable uses
+  MachineBasicBlock *NCD = KillBB;
   for (MachineInstr *UseMI : ReachableUses) {
     MachineBasicBlock *UseBB = UseMI->getParent();
     NCD = DT->findNearestCommonDominator(NCD, UseBB);
@@ -1355,10 +1355,10 @@ bool AMDGPUSSARegisterSpiller::tryHoistSpillToNCD(
   
   LLVM_DEBUG(dbgs() << "  NCD for hoisting: " << printMBBReference(*NCD) << "\n");
   
-  // Check if there are uses on path from NCD to SpillMI (exclusive)
-  // This checks blocks between NCD and SpillBB, plus SpillBB up to (but not including) SpillMI
-  if (hasUseOnPath(NCD, SpillBB, SpilledVMP, SpillMI)) {
-    LLVM_DEBUG(dbgs() << "  Uses exist on NCD→Spill path, cannot hoist\n");
+  // Check if there are uses on path from NCD to KillMI (exclusive)
+  // This checks blocks between NCD and KillBB, plus KillBB up to (but not including) KillMI
+  if (hasUseOnPath(NCD, KillBB, SpilledVMP, KillMI)) {
+    LLVM_DEBUG(dbgs() << "  Uses exist on NCD→Kill path, cannot hoist\n");
     return false;
   }
   
@@ -1366,7 +1366,7 @@ bool AMDGPUSSARegisterSpiller::tryHoistSpillToNCD(
   // Stop at the use instruction itself (don't include it)
   for (MachineInstr *UseMI : ReachableUses) {
     MachineBasicBlock *UseBB = UseMI->getParent();
-    if (UseBB != SpillBB && hasUseOnPath(NCD, UseBB, SpilledVMP, UseMI)) {
+    if (UseBB != KillBB && hasUseOnPath(NCD, UseBB, SpilledVMP, UseMI)) {
       LLVM_DEBUG(dbgs() << "  Uses exist on NCD→Use path, cannot hoist\n");
       return false;
     }
@@ -1374,50 +1374,59 @@ bool AMDGPUSSARegisterSpiller::tryHoistSpillToNCD(
   
   LLVM_DEBUG(dbgs() << "  No uses on either path, hoisting spill to NCD\n");
   
-  // Hoist: Move spill to end of NCD (before terminator)
-  SpillMI->removeFromParent();
-  NCD->insert(NCD->getFirstTerminator(), SpillMI);
+  // Note: With "store at definition", the actual store is at definition point.
+  // Here we're hoisting the "kill point" (where register dies) to NCD.
+  // The store remains at definition, but we mark the register dead earlier at NCD.
+  // This requires updating the LiveInterval to mark the register dead at NCD instead of KillMI.
   
-  // Update LiveIntervals for the moved instruction
-  LIS->handleMove(*SpillMI);
+  // Get NCD end index (before terminator)
+  SlotIndex NCDIdx = Indexes->getMBBEndIdx(NCD).getBaseIndex();
   
-  LLVM_DEBUG(dbgs() << "  Hoisted spill to: " << printMBBReference(*NCD) << "\n");
+  // Prune LiveInterval at NCD instead of KillMI
+  Register VReg = SpilledVMP.getVReg();
+  if (LIS->hasInterval(VReg)) {
+    LiveInterval &LI = LIS->getInterval(VReg);
+    LIS->pruneValue(*static_cast<LiveRange *>(&LI), NCDIdx, nullptr);
+    for (LiveInterval::SubRange &SR : LI.subranges()) {
+      LIS->pruneValue(SR, NCDIdx, nullptr);
+    }
+  }
+  
+  LLVM_DEBUG(dbgs() << "  Hoisted kill point to: " << printMBBReference(*NCD) << "\n");
   
   return true;
 }
 
 MachineInstr* AMDGPUSSARegisterSpiller::splitBlockBeforeReload(
-    MachineInstr *SpillMI, MachineInstr *ReloadMI, VRegMaskPair SpilledVMP,
-    const SmallVectorImpl<MachineBasicBlock *> &IDFBlocks) {
+    MachineInstr *KillMI, MachineInstr *ReloadMI, VRegMaskPair SpilledVMP) {
   
   LLVM_DEBUG(dbgs() << "    splitBlockBeforeReload() - creating conditional reload CFG\n");
   
-  MachineBasicBlock *SpillBB = SpillMI->getParent();
+  MachineBasicBlock *KillBB = KillMI->getParent();
   MachineBasicBlock *UseBB = ReloadMI->getParent();
-  MachineFunction *MF = SpillBB->getParent();
+  MachineFunction *MF = KillBB->getParent();
   
-  LLVM_DEBUG(dbgs() << "      SpillBB: " << printMBBReference(*SpillBB) << "\n");
+  LLVM_DEBUG(dbgs() << "      KillBB: " << printMBBReference(*KillBB) << "\n");
   LLVM_DEBUG(dbgs() << "      UseBB: " << printMBBReference(*UseBB) << "\n");
   
-  // Step 1: Find JoinBB - IDF block that dominates UseBB
-  // (IDF blocks are where spill and clean paths merge)
+  // Step 1: Find JoinBB - where spill and clean paths merge
+  // JoinBB is UseBB if it has multiple predecessors (it IS the join),
+  // otherwise find the nearest common dominator of UseBB's predecessors
   MachineBasicBlock *JoinBB = nullptr;
-  for (MachineBasicBlock *IDF : IDFBlocks) {
-    if (DT->dominates(IDF, UseBB)) {
-      JoinBB = IDF;
-      break;
-    }
-  }
   
-  if (!JoinBB) {
-    LLVM_DEBUG(dbgs() << "      WARNING: No JoinBB found, UseBB may BE the join\n");
-    // If UseBB has multiple predecessors and is in IDF, it IS the join
-    if (UseBB->pred_size() > 1 && 
-        std::find(IDFBlocks.begin(), IDFBlocks.end(), UseBB) != IDFBlocks.end()) {
+  if (UseBB->pred_size() > 1) {
+    // UseBB is the join point
+    JoinBB = UseBB;
+  } else {
+    // Single predecessor - find the join by walking up the dominator tree
+    // The join is the nearest common dominator of all paths reaching UseBB
+    // For a single predecessor, the join is that predecessor's dominator
+    MachineBasicBlock *Pred = *UseBB->pred_begin();
+    JoinBB = DT->findNearestCommonDominator(Pred, KillBB);
+    
+    // If JoinBB doesn't dominate UseBB, UseBB itself is the join
+    if (!DT->dominates(JoinBB, UseBB)) {
       JoinBB = UseBB;
-    } else {
-      LLVM_DEBUG(dbgs() << "      ERROR: Cannot determine JoinBB for split\n");
-      llvm_unreachable("Cannot determine JoinBB for conditional reload");
     }
   }
   
@@ -1429,12 +1438,12 @@ MachineInstr* AMDGPUSSARegisterSpiller::splitBlockBeforeReload(
   DenseMap<MachineBasicBlock *, Register> PredToFlagReg;
   
   for (MachineBasicBlock *Pred : JoinBB->predecessors()) {
-    bool IsSpillPath = (Pred == SpillBB) || DT->dominates(SpillBB, Pred);
+    bool IsSpillPath = (Pred == KillBB) || DT->dominates(KillBB, Pred);
     Register ConstReg = MRI->createVirtualRegister(&AMDGPU::SReg_32RegClass);
     
     // Insert S_MOV_B32 at end of predecessor (before terminator)
     auto InsertPt = Pred->getFirstTerminator();
-    MachineInstr *MovMI = BuildMI(*Pred, InsertPt, SpillMI->getDebugLoc(),
+    MachineInstr *MovMI = BuildMI(*Pred, InsertPt, KillMI->getDebugLoc(),
                                    TII->get(AMDGPU::S_MOV_B32), ConstReg)
                               .addImm(IsSpillPath ? 1 : 0);
     LIS->InsertMachineInstrInMaps(*MovMI);
@@ -1447,7 +1456,7 @@ MachineInstr* AMDGPUSSARegisterSpiller::splitBlockBeforeReload(
   // Now create PHI merging the flags
   Register FlagReg = MRI->createVirtualRegister(&AMDGPU::SReg_32RegClass);
   MachineInstr *FlagPHI = BuildMI(*JoinBB, JoinBB->begin(), 
-                                   SpillMI->getDebugLoc(),
+                                   KillMI->getDebugLoc(),
                                    TII->get(TargetOpcode::PHI), FlagReg);
   
   for (MachineBasicBlock *Pred : JoinBB->predecessors()) {
@@ -1500,7 +1509,7 @@ MachineInstr* AMDGPUSSARegisterSpiller::splitBlockBeforeReload(
   
   // Insert conditional branch at end of UseBB_Pre
   // First, compare FlagReg to 0 to set SCC
-  MachineInstr *CmpMI = BuildMI(*UseBB_Pre, UseBB_Pre->end(), SpillMI->getDebugLoc(),
+  MachineInstr *CmpMI = BuildMI(*UseBB_Pre, UseBB_Pre->end(), KillMI->getDebugLoc(),
                                  TII->get(AMDGPU::S_CMP_EQ_U32))
                             .addReg(FlagReg)
                             .addImm(0);
@@ -1508,7 +1517,7 @@ MachineInstr* AMDGPUSSARegisterSpiller::splitBlockBeforeReload(
   
   // Then branch if SCC=1 (flag == 0, clean path) to UseBB_Post
   // Otherwise fallthrough to ReloadBB (flag == 1, spill path)
-  MachineInstr *BranchMI = BuildMI(*UseBB_Pre, UseBB_Pre->end(), SpillMI->getDebugLoc(),
+  MachineInstr *BranchMI = BuildMI(*UseBB_Pre, UseBB_Pre->end(), KillMI->getDebugLoc(),
                                     TII->get(AMDGPU::S_CBRANCH_SCC1))
                                .addMBB(UseBB_Post);
   LIS->InsertMachineInstrInMaps(*BranchMI);
@@ -1546,150 +1555,16 @@ MachineInstr* AMDGPUSSARegisterSpiller::splitBlockBeforeReload(
   return ReloadMI;
 }
 
-void AMDGPUSSARegisterSpiller::handleUniformReachableUse(
-    MachineInstr *SpillMI, MachineInstr *ReloadMI, VRegMaskPair SpilledVMP,
-    const SmallVectorImpl<MachineBasicBlock *> &IDFBlocks) {
+void AMDGPUSSARegisterSpiller::handleReachableUse(
+    MachineInstr *KillMI, MachineInstr *ReloadMI, VRegMaskPair SpilledVMP) {
   
-  LLVM_DEBUG(dbgs() << "  Uniform case (no EXEC write) - splitting block\n");
-  
-  // Split join block, placing reload on spill-path edge only
-  [[maybe_unused]] MachineInstr *ReloadInSplitBlock = splitBlockBeforeReload(SpillMI, ReloadMI, SpilledVMP, IDFBlocks);
-  
-  // MachineLaneSSAUpdater will insert PHI automatically
-  // No WWM needed - EXEC is stable
-  
-  // TODO: Implement cost model for balanced spill decision:
-  //  - If avgRP_clean >= 0.8*RPLimit AND len_clean >= 50:
-  //    Insert additional spill on clean path after last use
-  //  - This avoids redundant memory traffic when clean path also benefits from spilling
-}
-
-void AMDGPUSSARegisterSpiller::handleDivergentReachableUse(
-    MachineInstr *SpillMI, MachineInstr *ReloadMI, VRegMaskPair SpilledVMP,
-    const SmallVectorImpl<MachineBasicBlock *> &IDFBlocks) {
-  
-  LLVM_DEBUG(dbgs() << "  Divergent case (EXEC write exists) - splitting block + WWM\n");
+  LLVM_DEBUG(dbgs() << "  Handling reachable use - splitting block\n");
   
   // Split join block, placing reload on spill-path edge only
-  [[maybe_unused]] MachineInstr *ReloadInSplitBlock = splitBlockBeforeReload(SpillMI, ReloadMI, SpilledVMP, IDFBlocks);
-  
-  // Wrap with WWM for correctness (EXEC drift protection)
-  wrapWithWWM(SpillMI, ReloadInSplitBlock);
+  // With "store at definition", we store the same mask as defined, so no WWM needed
+  splitBlockBeforeReload(KillMI, ReloadMI, SpilledVMP);
   
   // MachineLaneSSAUpdater will insert PHI automatically
-  
-  // TODO: Implement cost model for WWM vs EWF decision:
-  //  - Find first EXEC write on path: d_ewf = distance from spill to EXEC write
-  //  - Compute f_ewf = d_ewf / NUD (fraction of sink distance lost)
-  //  - If f_ewf <= 0.25: Prefer EWF (move reload to EXEC write point)
-  //  - Else: Prefer WWM (keep optimal placement, pay SGPR cost)
-  //  - If no transient SGPR pair available: Fallback to EWF
-}
-
-void AMDGPUSSARegisterSpiller::wrapWithWWM(
-    MachineInstr *SpillMI, MachineInstr *ReloadMI) {
-  
-  // WWM (Whole Wave Mode) wrapping ensures all lanes are spilled/reloaded
-  // regardless of current EXEC mask. This prevents EXEC drift correctness issues.
-  //
-  // Transformation:
-  //   Before:
-  //     SPILL %vreg (only active lanes per EXEC)
-  //     ...
-  //     RELOAD %vreg (only active lanes per EXEC)
-  //
-  //   After:
-  //     %save1 = COPY $exec
-  //     $exec = S_MOV_B64 -1 (or S_MOV_B32 for wave32)
-  //     SPILL %vreg (all lanes)
-  //     $exec = COPY %save1
-  //     ...
-  //     %save2 = COPY $exec
-  //     $exec = S_MOV_B64 -1
-  //     RELOAD %vreg (all lanes)
-  //     $exec = COPY %save2
-  
-  MachineBasicBlock *SpillBB = SpillMI->getParent();
-  MachineBasicBlock *ReloadBB = ReloadMI->getParent();
-  
-  // Use SIRegisterInfo methods for wave-size agnostic code
-  const TargetRegisterClass *ExecRC = TRI->getWaveMaskRegClass();
-  MCRegister ExecReg = TRI->getExec();
-  
-  LLVM_DEBUG(dbgs() << "    Wrapping with WWM, EXEC class: " 
-                    << TRI->getRegClassName(ExecRC) << "\n");
-  
-  // Allocate temporary SGPRs for EXEC save/restore
-  // TODO: Implement proper transient SGPR allocation
-  // For now, create virtual SGPRs and rely on RA to allocate them
-  Register ExecSave1 = MRI->createVirtualRegister(ExecRC);
-  Register ExecSave2 = MRI->createVirtualRegister(ExecRC);
-  
-  // Determine correct MOV opcode based on EXEC register size (wave32 vs wave64)
-  unsigned MovOpc = TRI->getRegSizeInBits(ExecReg, *MRI) == 32 
-                        ? AMDGPU::S_MOV_B32 
-                        : AMDGPU::S_MOV_B64;
-  
-  // Wrap spill with WWM
-  {
-    auto InsertPt = SpillMI->getIterator();
-    
-    // Save EXEC before spill
-    MachineInstr *SaveMI = BuildMI(*SpillBB, InsertPt, SpillMI->getDebugLoc(),
-                                   TII->get(AMDGPU::COPY), ExecSave1)
-                               .addReg(ExecReg);
-    LIS->InsertMachineInstrInMaps(*SaveMI);
-    
-    // Set EXEC to all-ones
-    MachineInstr *SetMI = BuildMI(*SpillBB, InsertPt, SpillMI->getDebugLoc(),
-                                  TII->get(MovOpc), ExecReg)
-                              .addImm(-1);
-    LIS->InsertMachineInstrInMaps(*SetMI);
-    
-    // Spill happens here (SpillMI already inserted)
-    
-    // Restore EXEC after spill
-    auto RestorePt = std::next(SpillMI->getIterator());
-    MachineInstr *RestoreMI = BuildMI(*SpillBB, RestorePt, SpillMI->getDebugLoc(),
-                                      TII->get(AMDGPU::COPY), ExecReg)
-                                  .addReg(ExecSave1);
-    LIS->InsertMachineInstrInMaps(*RestoreMI);
-    
-    LLVM_DEBUG(dbgs() << "      Inserted WWM wrapper around spill\n");
-  }
-  
-  // Wrap reload with WWM
-  {
-    auto InsertPt = ReloadMI->getIterator();
-    
-    // Save EXEC before reload
-    MachineInstr *SaveMI = BuildMI(*ReloadBB, InsertPt, ReloadMI->getDebugLoc(),
-                                   TII->get(AMDGPU::COPY), ExecSave2)
-                               .addReg(ExecReg);
-    LIS->InsertMachineInstrInMaps(*SaveMI);
-    
-    // Set EXEC to all-ones
-    MachineInstr *SetMI = BuildMI(*ReloadBB, InsertPt, ReloadMI->getDebugLoc(),
-                                  TII->get(MovOpc), ExecReg)
-                              .addImm(-1);
-    LIS->InsertMachineInstrInMaps(*SetMI);
-    
-    // Reload happens here (ReloadMI already inserted)
-    
-    // Restore EXEC after reload
-    auto RestorePt = std::next(ReloadMI->getIterator());
-    MachineInstr *RestoreMI = BuildMI(*ReloadBB, RestorePt, ReloadMI->getDebugLoc(),
-                                      TII->get(AMDGPU::COPY), ExecReg)
-                                  .addReg(ExecSave2);
-    LIS->InsertMachineInstrInMaps(*RestoreMI);
-    
-    LLVM_DEBUG(dbgs() << "      Inserted WWM wrapper around reload\n");
-  }
-  
-  LLVM_DEBUG(dbgs() << "    WWM wrapping complete\n");
-  
-  // TODO: Check if transient SGPR pair is available
-  // TODO: If not available, fallback to EWF placement instead
 }
 
 bool AMDGPUSSARegisterSpiller::runOnMachineFunction(MachineFunction &MF) {
