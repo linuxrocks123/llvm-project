@@ -240,13 +240,23 @@ public:
     LaneCoverageResult Result(VMP.LaneMask);
     auto It = SetStorage.find(VMP.VReg);
     if (It != SetStorage.end()) {
-      MaskSet Masks = It->second;
+      const MaskSet &Masks = It->second;
       for (auto Mask : Masks) {
         Result.Covered |= (Mask & VMP.LaneMask);
       }
       Result.NotCovered = (VMP.LaneMask & ~Result.Covered);
     }
     return Result;
+  }
+
+  /// Check if any element in this set overlaps with the given VRegMaskPair.
+  /// Returns true if at least one element shares the same VReg and has
+  /// overlapping lane masks.
+  ///
+  /// \param VMP - The VRegMaskPair to check for overlap
+  /// \returns true if any element in the set overlaps with VMP
+  bool overlaps(const VRegMaskPair &VMP) const {
+    return getCoverage(VMP).getCovered().any();
   }
 
   bool operator==(const VRegMaskPairSet &Other) const {

@@ -235,6 +235,13 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   bool hasUseOnPath(MachineBasicBlock *StartBB, MachineBasicBlock *EndBB, 
                     VRegMaskPair SpilledVMP, MachineInstr *StopInstr = nullptr) const;
   
+  /// Checks if the given block has any use of SpilledVMP.
+  /// If StopInstr is provided and is in this block, only checks up to that instruction.
+  /// Uses NextUseAnalysis for fast full-block checks, falls back to instruction scan
+  /// for partial blocks.
+  bool blockHasUse(MachineBasicBlock *BB, VRegMaskPair SpilledVMP,
+                   MachineInstr *StopInstr) const;
+  
   /// Check if the given instruction still uses the spilled register with
   /// overlapping lane mask. Returns false if the use was rewritten by SSA repair.
   bool usesSpilledVMP(const MachineInstr *MI, VRegMaskPair SpilledVMP) const;

@@ -224,7 +224,7 @@ class NextUseResult {
 
 public:
 private:
-  DenseMap<unsigned, SetVector<VRegMaskPair>> UsedInBlock;
+  DenseMap<unsigned, VRegMaskPairSet> UsedInBlock;
   DenseMap<int, int> LoopExits;
   // Signed tag used to mark "outside current loop" in stored values.
   // Must be >> any finite distance you can accumulate in one function.
@@ -396,7 +396,7 @@ public:
                           : getNextUseDistance(I, VMP) == Infinity;
   }
 
-  SetVector<VRegMaskPair> &usedInBlock(MachineBasicBlock &MBB) {
+  VRegMaskPairSet &usedInBlock(MachineBasicBlock &MBB) {
     return UsedInBlock[MBB.getNumber()];
   }
 

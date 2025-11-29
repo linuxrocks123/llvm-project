@@ -739,10 +739,9 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
     dbgs() << "KillMI: " << *KillMI;
   });
 
-  // Step 1: Classify uses into dominated and non-dominated
-  // Defer IDF calculation until we know we need it (optimization for common case)
+  // Step 1: Classify uses into dominated, reachable, or unreachable
   SmallVector<MachineInstr *> DominatedUses;
-  SmallVector<MachineInstr *> NonDominatedUses;
+  SmallVector<MachineInstr *> ReachableUses;
   
   for (MachineInstr &UseMI : MRI->use_nodbg_instructions(SpilledReg)) {
     
@@ -768,58 +767,25 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
     if (UseMI.isPHI())
       continue;
     
-    // Check if this use actually uses the spilled lanes
-    // For subregister spills, we only reload for uses that overlap with spilled mask
-    bool UsesSpilledLanes = false;
-    for (const MachineOperand &MO : UseMI.uses()) {
-      if (MO.isReg() && MO.getReg() == SpilledReg) {
-        LaneBitmask UseMask = TRI->getSubRegIndexLaneMask(MO.getSubReg());
-        if (UseMask == LaneBitmask::getAll())
-          UseMask = MRI->getMaxLaneMaskForVReg(SpilledReg);
-        // Check if this use overlaps with the spilled lanes
-        if ((UseMask & SpilledMask).any()) {
-          UsesSpilledLanes = true;
-          break;
-        }
-      }
-    }
+    // Find the use operand to check lane overlap and classify
+    MachineOperand *UseOp = UseMI.findRegisterUseOperand(SpilledReg, TRI, /*isKill=*/false);
+    if (!UseOp)
+      continue;  // No use of SpilledReg in this instruction
     
-    if (!UsesSpilledLanes)
-      continue;
+    VRegMaskPair UseVMP(*UseOp, TRI, MRI);
+    if (!UseVMP.overlaps(SpilledVMP))
+      continue;  // Use doesn't overlap with spilled lanes
     
-    // Classify: dominated or not
+    // Classify uses inline: dominated, reachable, or unreachable
     if (DT->dominates(KillMI, &UseMI)) {
       DominatedUses.push_back(&UseMI);
       LLVM_DEBUG(dbgs() << "  Dominated use: " << UseMI);
+    } else if (SSAUpdater->isUseReachableFromDef(KillMI, &UseMI, SpilledReg,
+                                                  SpilledMask)) {
+      ReachableUses.push_back(&UseMI);
+      LLVM_DEBUG(dbgs() << "  Reachable (non-dominated) use: " << UseMI);
     } else {
-      NonDominatedUses.push_back(&UseMI);
-      LLVM_DEBUG(dbgs() << "  Non-dominated use: " << UseMI);
-    }
-  }
-  
-  // Step 1a: Classify non-dominated uses using SSA updater's reachability API
-  SmallVector<MachineInstr *> ReachableUses;
-  
-  if (!NonDominatedUses.empty()) {
-    // Use class member SSA updater (caches IDF computations across calls)
-    
-    for (MachineInstr *UseMI : NonDominatedUses) {
-      // Find any use operand for the spilled register
-      if (MachineOperand *UseOp = UseMI->findRegisterUseOperand(SpilledReg, TRI, /*isKill=*/false)) {
-        // Check if this use overlaps with spilled lanes
-        VRegMaskPair UseVMP(*UseOp, TRI, MRI);
-        if (UseVMP.overlaps(SpilledVMP)) {
-          // Use new overload that takes MachineInstr* instead of MachineOperand*
-          // Pass SpilledVMP.getLaneMask() since KillMI doesn't define/use SpilledReg
-          if (SSAUpdater->isUseReachableFromDef(KillMI, UseMI, SpilledReg,
-                                                SpilledVMP.getLaneMask())) {
-            ReachableUses.push_back(UseMI);
-            LLVM_DEBUG(dbgs() << "  Classified as reachable: " << *UseMI);
-          } else {
-            LLVM_DEBUG(dbgs() << "  Unreachable use (ignored): " << *UseMI);
-          }
-        }
-      }
+      LLVM_DEBUG(dbgs() << "  Unreachable use (ignored): " << UseMI);
     }
   }
   
@@ -1411,53 +1377,54 @@ bool AMDGPUSSARegisterSpiller::hasUseOnPath(
   // This is used when StartBB is NCD - we don't want to consider uses in NCD itself,
   // only uses between NCD's exit and EndBB (or before StopInstr in EndBB)
   
-  Register VReg = SpilledVMP.getVReg();
-  LaneBitmask Mask = SpilledVMP.getLaneMask();
-  
-  // DFS from StartBB's successors to EndBB, checking for uses
   SmallPtrSet<MachineBasicBlock *, 8> Visited;
   SmallVector<MachineBasicBlock *, 8> Worklist(StartBB->successors());
   
   while (!Worklist.empty()) {
     MachineBasicBlock *BB = Worklist.pop_back_val();
-    
     if (!Visited.insert(BB).second)
       continue;
-      
-    // Check for uses in this block
-    // If this is EndBB and StopInstr is specified, only check up to StopInstr
-    auto EndIt = (BB == EndBB && StopInstr) ? StopInstr->getIterator() : BB->end();
-    
-    for (auto I = BB->begin(), E = EndIt; I != E; ++I) {
-      const MachineInstr &MI = *I;
-      
-      for (const MachineOperand &MO : MI.uses()) {
-        if (MO.isReg() && MO.getReg() == VReg) {
-          // Check lane mask overlap
-          LaneBitmask UseMask = TRI->getSubRegIndexLaneMask(MO.getSubReg());
-          if (UseMask == LaneBitmask::getAll())
-            UseMask = MRI->getMaxLaneMaskForVReg(VReg);
-          
-          if ((UseMask & Mask).any()) {
-            LLVM_DEBUG(dbgs() << "  Found use on path at: " << MI);
-            return true;
-          }
-        }
-      }
-    }
-    
-    // If we reached the end block, stop
+
+    MachineInstr *BlockStop = (BB == EndBB) ? StopInstr : nullptr;
+    if (blockHasUse(BB, SpilledVMP, BlockStop))
+      return true;
+
     if (BB == EndBB)
       continue;
-      
-    // Continue to successors
-    for (MachineBasicBlock *Succ : BB->successors()) {
+
+    for (MachineBasicBlock *Succ : BB->successors())
       if (!Visited.count(Succ))
         Worklist.push_back(Succ);
-    }
   }
-  
   return false;
+}
+
+bool AMDGPUSSARegisterSpiller::blockHasUse(MachineBasicBlock *BB,
+                                           VRegMaskPair SpilledVMP,
+                                           MachineInstr *StopInstr) const {
+  // If we need to stop mid-block, fall back to instruction scan
+  if (StopInstr && StopInstr->getParent() == BB) {
+    auto EndIt = StopInstr->getIterator();
+    for (auto I = BB->begin(); I != EndIt; ++I) {
+      if (usesSpilledVMP(&*I, SpilledVMP)) {
+        LLVM_DEBUG(dbgs() << "  Found use on path at: " << *I);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Otherwise use NextUse's precomputed block summary
+  bool HasUse = NU->usedInBlock(*BB).overlaps(SpilledVMP);
+  
+  LLVM_DEBUG({
+    if (HasUse)
+      dbgs() << "  Block " << printMBBReference(*BB) 
+             << " has use of " << printReg(SpilledVMP.getVReg(), TRI) 
+             << " (via NextUseAnalysis)\n";
+  });
+  
+  return HasUse;
 }
 
 bool AMDGPUSSARegisterSpiller::tryHoistSpillToNCD(
