@@ -33,7 +33,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Register.h"
 #include "llvm/CodeGen/SlotIndexes.h"
-#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/DenseMap.h"
 
 namespace llvm {
 
@@ -73,6 +73,9 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   // FIXME: Add cache invalidation when CFG changes
   std::unique_ptr<MachineLaneSSAUpdater> SSAUpdater;
 
+  // Register pressure tracker (reused throughout the pass)
+  std::unique_ptr<GCNUpwardRPTracker> RPTracker;
+
   // Next use analysis for spill candidate selection
   AMDGPUNextUseAnalysis::Result *NU = nullptr;
 
@@ -82,7 +85,7 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   // Track registers that have been stored at definition (to avoid EXEC drift)
   // When a register is selected for spilling, we store it right after definition
   // (when EXEC is full), then mark it dead at the "real spill" point using pruneValue()
-  DenseSet<VRegMaskPair> StoredAtDefinition;
+  DenseMap<VRegMaskPair, MachineInstr *> StoredAtDefinition;
 
   // Divergent path handling: Maps spill instruction to reload instruction
   // for reachable but not dominated uses (divergent paths)
@@ -115,6 +118,11 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   /// Processes the entire function for one register class (SGPR or VGPR).
   /// This is called twice: first for SGPRs, then for VGPRs.
   bool processFunction(MachineFunction &MF, unsigned RPLimit, bool IsVGPRPass);
+
+  /// Validates that final register pressure is within limits after all spilling.
+  /// This is a temporary validation check until we properly handle clean path reloads.
+  void validateFinalRegisterPressure(MachineFunction &MF, unsigned RPLimit,
+                                      bool IsVGPR);
 
   /// Sorts the register set by next-use distance (descending).
   /// Registers with longer next-use distances are moved to the back.

@@ -11,11 +11,14 @@
 #include "AMDGPUSSARAUtils.h"
 #include "GCNRegPressure.h"
 #include "GCNSubtarget.h"
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "SIRegisterInfo.h"
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/Register.h"
 #include "llvm/InitializePasses.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/GenericIteratedDominanceFrontier.h"
 #include <algorithm>
 
@@ -25,6 +28,11 @@ using namespace llvm;
 
 STATISTIC(NumSpills, "Number of register spills");
 STATISTIC(NumReloads, "Number of register reloads");
+
+static cl::opt<bool> EnableVirtualSpillMarkers(
+    "amdgpu-ssa-spill-markers",
+    cl::desc("Emit SI_VIRTUAL_SPILL_MARKER instructions for SSA spiller tests"),
+    cl::Hidden, cl::init(false));
 
 // ============================================================================
 // Helper function to identify spill instructions
@@ -168,6 +176,60 @@ VRegMaskPairSet AMDGPUSSARegisterSpiller::convertLiveRegs(
   return Result;
 }
 
+void AMDGPUSSARegisterSpiller::validateFinalRegisterPressure(
+    MachineFunction &MF, unsigned RPLimit, bool IsVGPR) {
+  
+  const char *RegClassName = IsVGPR ? "VGPR" : "SGPR";
+  
+  LLVM_DEBUG(dbgs() << "\n=== Validating Final Register Pressure ("
+                    << RegClassName << ") ===\n");
+  
+  // Traverse basic blocks same as in processFunction
+  ReversePostOrderTraversal<MachineFunction *> RPOT(&MF);
+  
+  for (MachineBasicBlock *MBB : RPOT) {
+    if (MBB->empty())
+      continue;
+    
+    // Walk forward through the block
+    for (auto I = MBB->begin(), E = MBB->end(); I != E; ++I) {
+      MachineInstr &MI = *I;
+      
+      // Skip spill/reload instructions (same as in processFunction)
+      if (isSpillInstr(&MI) || isReloadInstr(&MI))
+        continue;
+      
+      // Reset tracker to compute pressure at this instruction
+      RPTracker->reset(MI);
+      
+      // Get current pressure
+      GCNRegPressure CurPressure = RPTracker->getPressure();
+      const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
+      unsigned CurRP = IsVGPR ? CurPressure.getVGPRNum(ST.hasGFX90AInsts())
+                              : CurPressure.getSGPRNum();
+      
+      if (CurRP > RPLimit) {
+        std::string Msg;
+        raw_string_ostream OS(Msg);
+        OS << "SSA Spiller FINAL RP VALIDATION FAILED!\n";
+        OS << "  Register class: " << RegClassName << "\n";
+        OS << "  Current RP: " << CurRP << "\n";
+        OS << "  RP Limit: " << RPLimit << "\n";
+        OS << "  At instruction: " << MI << "\n";
+        OS << "  In block: " << printMBBReference(*MBB) << "\n";
+        OS << "\nThis indicates the spiller failed to keep RP within limits.\n";
+        OS << "Possible causes:\n";
+        OS << "  1. Reloads inserted on clean paths (needs split-before-use)\n";
+        OS << "  2. Insufficient spilling (selection algorithm issue)\n";
+        OS << "  3. LiveInterval not properly shrunk after spilling\n";
+        report_fatal_error(Twine(OS.str()));
+      }
+    }
+  }
+  
+  LLVM_DEBUG(dbgs() << "✅ Final RP validation passed for " << RegClassName << "\n");
+}
+
 bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
                                                unsigned RPLimit,
                                                bool IsVGPRPass) {
@@ -177,6 +239,9 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
   // Initialize SSA updater (reused throughout the pass, caches IDF computations)
   // FIXME: Clear cache if CFG changes during spilling
   SSAUpdater = std::make_unique<MachineLaneSSAUpdater>(MF, *LIS, *DT, *TRI);
+
+  // Initialize register pressure tracker (reused throughout the pass)
+  RPTracker = std::make_unique<GCNUpwardRPTracker>(*LIS);
 
   // Store RP limits for reload budget checking
   if (IsVGPRPass)
@@ -196,12 +261,15 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
     if (MBB->empty())
       continue;
 
-    // Initialize GCNUpwardRPTracker - it analyzes backward to compute live state
-    // But we walk the block forward (top-down) for spilling
-    GCNUpwardRPTracker RPTracker(*LIS);
-    
     // Traverse instructions forward (from beginning to end)
     // When we spill at point P, pressure drops from P forward
+    //
+    // Design Note: We use reset() + forward walk (not recede() + backward walk) because:
+    // - Spill insertion at I reduces pressure from I *forward* (down in control flow)
+    // - Walking forward with reset(I) naturally sees reduced pressure at I+1 after spilling at I
+    // - Walking backward with recede() would detect high RP at I *after* already processing
+    //   instructions I+1, I+2, ... that would benefit from the spill (timing mismatch)
+    // - reset() cost is O(n) per instruction, acceptable for typical block sizes
     for (auto I = MBB->begin(), E = MBB->end(); I != E; ++I) {
       MachineInstr &MI = *I;
 
@@ -215,10 +283,10 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
 
       // Reset tracker to this instruction - it will compute what's live here
       // by analyzing backward from this point
-      RPTracker.reset(MI);
+      RPTracker->reset(MI);
 
       // Get current register pressure at this point
-      GCNRegPressure CurPressure = RPTracker.getPressure();
+      GCNRegPressure CurPressure = RPTracker->getPressure();
       
       // Get pressure for the current pass using the appropriate API
       const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
@@ -288,6 +356,10 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
       }
     }
   }
+  
+  // TEMPORARY: Validate final RP after all spilling is complete
+  validateFinalRegisterPressure(MF, RPLimit, IsVGPRPass);
+  
   return Changed;
 }
 
@@ -586,10 +658,42 @@ bool AMDGPUSSARegisterSpiller::spillAndReload(
     MachineBasicBlock::iterator SpillPos = I.getReverse();
     
     SlotIndex KillIdx;
-    if (SpillPos == MBB.begin()) {
-      KillIdx = Indexes->getMBBStartIdx(&MBB);
+    if (SpillPos == MBB.end()) {
+      KillIdx = Indexes->getMBBEndIdx(&MBB).getPrevSlot();
     } else {
-      KillIdx = Indexes->getInstructionIndex(*SpillPos).getBaseIndex();
+      KillIdx = Indexes->getInstructionIndex(*SpillPos).getRegSlot();
+    }
+
+    if (EnableVirtualSpillMarkers) {
+      // Avoid dropping a marker immediately after the actual spill store
+      // for the same VReg/Lane mask.
+      MachineInstr *PrevMI = nullptr;
+      if (SpillPos == MBB.end()) {
+        if (!MBB.empty()) {
+          auto PrevIt = MBB.end();
+          --PrevIt;
+          PrevMI = &*PrevIt;
+        }
+      } else if (SpillPos != MBB.begin()) {
+        auto PrevIt = SpillPos;
+        --PrevIt;
+        PrevMI = &*PrevIt;
+      }
+
+      if (!PrevMI || !isSpillInstr(PrevMI) || !usesSpilledVMP(PrevMI, VMP)) {
+        // Insert MIR-visible marker so tests can assert the virtual spill point.
+        DebugLoc SpillDL =
+            SpillPos == MBB.end() ? DebugLoc() : SpillPos->getDebugLoc();
+        MachineInstr *MarkerMI =
+            BuildMI(MBB, SpillPos, SpillDL,
+                    TII->get(AMDGPU::SI_VIRTUAL_SPILL_MARKER))
+                .addImm(VReg.virtRegIndex())
+                .addImm(Mask.getAsInteger());
+        LIS->InsertMachineInstrInMaps(*MarkerMI);
+      } else {
+        LLVM_DEBUG(dbgs()
+                   << "Skipping virtual spill marker (adjacent real spill of same VMP)\n");
+      }
     }
     
     LLVM_DEBUG({
@@ -863,6 +967,19 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
 // ============================================================================
 
 MachineInstr *AMDGPUSSARegisterSpiller::spillAtDefinition(VRegMaskPair VMP) {
+  if (MachineInstr *Existing = StoredAtDefinition.lookup(VMP)) {
+    LLVM_DEBUG({
+      StringRef Name = MRI->getVRegName(VMP.getVReg());
+      dbgs() << "spillAtDefinition(): Already stored ";
+      if (!Name.empty())
+        dbgs() << "%" << Name;
+      else
+        dbgs() << printReg(VMP.getVReg(), TRI);
+      dbgs() << " at definition\n";
+    });
+    return Existing;
+  }
+
   Register VReg = VMP.getVReg();
   LaneBitmask Mask = VMP.getLaneMask();
   
@@ -924,7 +1041,7 @@ MachineInstr *AMDGPUSSARegisterSpiller::spillAtDefinition(VRegMaskPair VMP) {
   LIS->InsertMachineInstrInMaps(StoreMI);
 
   // Mark this register as stored at definition
-  StoredAtDefinition.insert(VMP);
+  StoredAtDefinition[VMP] = &StoreMI;
 
   LLVM_DEBUG(dbgs() << "spillAtDefinition(): Stored: " << StoreMI);
   ++NumSpills;
@@ -1135,6 +1252,15 @@ MachineInstr *AMDGPUSSARegisterSpiller::emitReload(
   LLVM_DEBUG(dbgs() << "emitReload(): RP check: current=" << CurRP
                     << " (limit=" << RPLimitForCheck << ")\n");
   
+  // TEMPORARY: RP check on reload disabled during SSA spilling.
+  // This check is invalid because:
+  // 1. RP hasn't converged yet (more registers will be spilled later)
+  // 2. Spilled register's LiveInterval isn't shrunk until after emitReloadsAndRepairSSA
+  // 3. Reloads on clean paths increase RP (needs split-before-use optimization)
+  // We validate final RP at the end of processFunction instead.
+  
+  // OLD CODE (commented out temporarily):
+  /*
   if (CurRP > RPLimitForCheck) {
     std::string Msg;
     raw_string_ostream OS(Msg);
@@ -1149,6 +1275,7 @@ MachineInstr *AMDGPUSSARegisterSpiller::emitReload(
     OS << "  Block: " << printMBBReference(*MBB) << "\n";
     report_fatal_error(Twine(OS.str()));
   }
+  */
 
   // Emit reload instruction directly to OrigVReg (or OrigVReg.subreg)
   // This temporarily violates SSA, which MachineLaneSSAUpdater will fix
@@ -1471,45 +1598,45 @@ MachineInstr* AMDGPUSSARegisterSpiller::splitBlockBeforeReload(
   // Create ReloadBB first, then UseBB_Post, so block numbers match physical order
   // This is required for insertMBBInMaps which asserts prevMBB has lower number
   
-  MachineBasicBlock *UseBB_Pre = UseBB;
+  MachineBasicBlock *UseBBPre = UseBB;
   
   // Create ReloadBB first (gets lower block number)
   MachineBasicBlock *ReloadBB = MF->CreateMachineBasicBlock(UseBB->getBasicBlock());
   
   // Create UseBB_Post second (gets higher block number)
-  MachineBasicBlock *UseBB_Post = MF->CreateMachineBasicBlock(UseBB->getBasicBlock());
+  MachineBasicBlock *UseBBPost = MF->CreateMachineBasicBlock(UseBB->getBasicBlock());
   
   // Insert ReloadBB right after UseBB_Pre
-  MF->insert(std::next(MachineFunction::iterator(UseBB_Pre)), ReloadBB);
+  MF->insert(std::next(MachineFunction::iterator(UseBBPre)), ReloadBB);
   
   // Insert UseBB_Post right after ReloadBB
-  MF->insert(std::next(MachineFunction::iterator(ReloadBB)), UseBB_Post);
+  MF->insert(std::next(MachineFunction::iterator(ReloadBB)), UseBBPost);
   
   // Move instructions from ReloadMI onwards to UseBB_Post
-  UseBB_Post->splice(UseBB_Post->begin(), UseBB, ReloadMI, UseBB->end());
+  UseBBPost->splice(UseBBPost->begin(), UseBB, ReloadMI, UseBB->end());
   
   // Transfer successors from UseBB_Pre to UseBB_Post
-  UseBB_Post->transferSuccessorsAndUpdatePHIs(UseBB_Pre);
+  UseBBPost->transferSuccessorsAndUpdatePHIs(UseBBPre);
   
-  LLVM_DEBUG(dbgs() << "      Created ReloadBB and UseBB_Post in correct order\n");
+  LLVM_DEBUG(dbgs() << "      Created ReloadBB and UseBBPost in correct order\n");
   
   // Move ReloadMI into ReloadBB (it's currently in UseBB_Post)
-  ReloadBB->splice(ReloadBB->begin(), UseBB_Post, ReloadMI);
+  ReloadBB->splice(ReloadBB->begin(), UseBBPost, ReloadMI);
   
   // ReloadBB falls through to UseBB_Post
-  ReloadBB->addSuccessor(UseBB_Post);
+  ReloadBB->addSuccessor(UseBBPost);
   
   LLVM_DEBUG(dbgs() << "      Created ReloadBB with reload instruction\n");
   
-  // Step 5: Update UseBB_Pre to have conditional branch
-  // Layout: UseBB_Pre → ReloadBB → UseBB_Post
-  // Branch: if (FlagReg == 0) goto UseBB_Post, else fallthrough to ReloadBB
+  // Step 5: Update UseBBPre to have conditional branch
+  // Layout: UseBBPre → ReloadBB → UseBBPost
+  // Branch: if (FlagReg == 0) goto UseBBPost, else fallthrough to ReloadBB
   // This ensures: FlagReg=1 (came from spill path) → fallthrough to ReloadBB
-  //               FlagReg=0 (came from clean path) → branch to UseBB_Post
-  
-  // Insert conditional branch at end of UseBB_Pre
+  //               FlagReg=0 (came from clean path) → branch to UseBBPost
+
+  // Insert conditional branch at end of UseBBPre
   // First, compare FlagReg to 0 to set SCC
-  MachineInstr *CmpMI = BuildMI(*UseBB_Pre, UseBB_Pre->end(), KillMI->getDebugLoc(),
+  MachineInstr *CmpMI = BuildMI(*UseBBPre, UseBBPre->end(), KillMI->getDebugLoc(),
                                  TII->get(AMDGPU::S_CMP_EQ_U32))
                             .addReg(FlagReg)
                             .addImm(0);
@@ -1517,39 +1644,39 @@ MachineInstr* AMDGPUSSARegisterSpiller::splitBlockBeforeReload(
   
   // Then branch if SCC=1 (flag == 0, clean path) to UseBB_Post
   // Otherwise fallthrough to ReloadBB (flag == 1, spill path)
-  MachineInstr *BranchMI = BuildMI(*UseBB_Pre, UseBB_Pre->end(), KillMI->getDebugLoc(),
+  MachineInstr *BranchMI = BuildMI(*UseBBPre, UseBBPre->end(), KillMI->getDebugLoc(),
                                     TII->get(AMDGPU::S_CBRANCH_SCC1))
-                               .addMBB(UseBB_Post);
+                               .addMBB(UseBBPost);
   LIS->InsertMachineInstrInMaps(*BranchMI);
   
   // Successors: branch to UseBB_Post (clean path), fallthrough to ReloadBB (spill path)
-  UseBB_Pre->addSuccessor(UseBB_Post);  // branch target
-  UseBB_Pre->addSuccessor(ReloadBB);    // fallthrough
-  
-  LLVM_DEBUG(dbgs() << "      Inserted conditional branch in UseBB_Pre\n");
-  
+  UseBBPre->addSuccessor(UseBBPost);  // branch target
+  UseBBPre->addSuccessor(ReloadBB);   // fallthrough
+
+  LLVM_DEBUG(dbgs() << "      Inserted conditional branch in UseBBPre\n");
+
   // Step 6: Update dominator tree
-  // ReloadBB is dominated by UseBB_Pre
-  // UseBB_Post is dominated by UseBB_Pre (both paths go through it)
-  DT->addNewBlock(UseBB_Post, UseBB_Pre);
-  DT->addNewBlock(ReloadBB, UseBB_Pre);
-  
+  // ReloadBB is dominated by UseBBPre
+  // UseBBPost is dominated by UseBBPre (both paths go through it)
+  DT->addNewBlock(UseBBPost, UseBBPre);
+  DT->addNewBlock(ReloadBB, UseBBPre);
+
   // Register new blocks with SlotIndexes in block number order
   // ReloadBB created first → lower block number
-  // UseBB_Post created second → higher block number  
-  // Physical order matches number order: UseBB_Pre → ReloadBB → UseBB_Post
+  // UseBBPost created second → higher block number  
+  // Physical order matches number order: UseBBPre → ReloadBB → UseBBPost
   // insertMBBInMaps asserts: mbb->getNumber() == MBBRanges.size()
   Indexes->insertMBBInMaps(ReloadBB);
-  Indexes->insertMBBInMaps(UseBB_Post);
+  Indexes->insertMBBInMaps(UseBBPost);
   
   LLVM_DEBUG(dbgs() << "      Updated DominatorTree and registered new blocks with SlotIndexes\n");
   
-  // Step 7: MachineLaneSSAUpdater will insert value PHI at UseBB_Post
+  // Step 7: MachineLaneSSAUpdater will insert value PHI at UseBBPost
   // when it detects that the reloaded value doesn't dominate all uses
-  // The PHI will merge: PHI(original_value from UseBB_Pre, reloaded_value from ReloadBB)
+  // The PHI will merge: PHI(original_value from UseBBPre, reloaded_value from ReloadBB)
   
   LLVM_DEBUG(dbgs() << "      Conditional reload CFG created successfully\n");
-  LLVM_DEBUG(dbgs() << "      MachineLaneSSAUpdater will insert value PHI at UseBB_Post\n");
+  LLVM_DEBUG(dbgs() << "      MachineLaneSSAUpdater will insert value PHI at UseBBPost\n");
   
   // Return the reload instruction (still in ReloadBB)
   return ReloadMI;
@@ -1631,6 +1758,12 @@ bool AMDGPUSSARegisterSpiller::runOnMachineFunction(MachineFunction &MF) {
                     << MF.getName() << "\n");
   LLVM_DEBUG(dbgs() << "Total spills: " << NumSpills << ", Total reloads: "
                     << NumReloads << "\n");
+
+  // Dump final LiveIntervals state for testing/verification
+  LLVM_DEBUG({
+    dbgs() << "\n********** FINAL LIVE INTERVALS **********\n";
+    LIS->print(dbgs());
+  });
 
   // Return true if either pass made modifications
   return ChangedSGPR || ChangedVGPR;

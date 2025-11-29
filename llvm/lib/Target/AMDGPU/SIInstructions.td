@@ -506,6 +506,19 @@ def SCHED_GROUP_BARRIER : SPseudoInstSI<
   let isMeta = 1;
 }
 
+// Meta marker emitted by the SSA register spiller so MIR tests can capture the
+// virtual spill point slot without affecting final code generation. Removed in
+// SIInstrInfo::expandPostRAPseudo.
+def SI_VIRTUAL_SPILL_MARKER
+    : SPseudoInstSI<(outs), (ins i32imm:$virt_idx, i64imm:$lane_mask)> {
+  let isPseudo = 1;
+  let isMeta = 1;
+  let Size = 0;
+  let hasSideEffects = 0;
+  let mayLoad = 0;
+  let mayStore = 0;
+}
+
 def IGLP_OPT : SPseudoInstSI<(outs), (ins i32imm:$mask),
   [(int_amdgcn_iglp_opt (i32 timm:$mask))]> {
   let SchedRW = [];
