@@ -50,12 +50,14 @@ using namespace llvm;
 // MachineLaneSSAUpdater Implementation
 //===----------------------------------------------------------------------===//
 
-Register MachineLaneSSAUpdater::repairSSAForNewDef(MachineInstr &NewDefMI,
-                                                    Register OrigVReg) {
-  LLVM_DEBUG(dbgs() << "MachineLaneSSAUpdater::repairSSAForNewDef VReg=" << OrigVReg << "\n");
-  
+Register MachineLaneSSAUpdater::repairSSAForNewDef(
+    MachineInstr &NewDefMI, Register OrigVReg,
+    SmallVectorImpl<MachineOperand *> &PHIRegDefOps) {
+  LLVM_DEBUG(dbgs() << "MachineLaneSSAUpdater::repairSSAForNewDef VReg="
+                    << OrigVReg << "\n");
+
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  
+
   // Step 1: Find the def operand for OrigVReg
   MachineOperand *DefOp = nullptr;
   unsigned DefOpIdx = 0;
@@ -119,7 +121,7 @@ Register MachineLaneSSAUpdater::repairSSAForNewDef(MachineInstr &NewDefMI,
   
   // Step 6: Perform common SSA repair (PHI placement + use rewriting)
   // LiveInterval for NewSSAVReg will be created by getInterval() as needed
-  performSSARepair(NewSSAVReg, OrigVReg, DefMask, NewDefMI.getParent());
+  PHIRegDefOps = performSSARepair(NewSSAVReg, OrigVReg, DefMask, NewDefMI.getParent());
   
   // Step 7: If SSA repair created subregister uses of OrigVReg (e.g., in PHIs or REG_SEQUENCEs),
   // recompute its LiveInterval to create subranges
@@ -154,19 +156,22 @@ Register MachineLaneSSAUpdater::repairSSAForNewDef(MachineInstr &NewDefMI,
 // Common SSA Repair Logic
 //===----------------------------------------------------------------------===//
 
-void MachineLaneSSAUpdater::performSSARepair(Register NewVReg, Register OrigVReg, 
-                                              LaneBitmask DefMask, MachineBasicBlock *DefBB) {
+SmallVector<MachineOperand *>
+MachineLaneSSAUpdater::performSSARepair(Register NewVReg, Register OrigVReg,
+                                        LaneBitmask DefMask,
+                                        MachineBasicBlock *DefBB) {
   LLVM_DEBUG(dbgs() << "MachineLaneSSAUpdater::performSSARepair NewVReg=" << NewVReg
                     << " OrigVReg=" << OrigVReg << " DefMask=" << PrintLaneMask(DefMask) << "\n");
   
   // Step 1: Use worklist-driven PHI placement
-  SmallVector<Register> AllPHIVRegs = insertLaneAwarePHI(NewVReg, OrigVReg, DefMask, DefBB);
-  
+  SmallVector<MachineOperand *> AllPHIVResults =
+      insertLaneAwarePHI(NewVReg, OrigVReg, DefMask, DefBB);
+
   // Step 2: Rewrite dominated uses once for each new register
   // Note: getInterval() will automatically create LiveIntervals if needed
   rewriteDominatedUses(OrigVReg, NewVReg, DefMask);
-  for (Register PHIVReg : AllPHIVRegs) {
-    rewriteDominatedUses(OrigVReg, PHIVReg, DefMask);
+  for (MachineOperand* PHIVRes : AllPHIVResults) {
+    rewriteDominatedUses(OrigVReg, PHIVRes->getReg(), DefMask);
   }
   
   // Step 3: Renumber values if needed
@@ -174,8 +179,8 @@ void MachineLaneSSAUpdater::performSSARepair(Register NewVReg, Register OrigVReg
   NewLI.RenumberValues();
   
   // Also renumber PHI intervals
-  for (Register PHIVReg : AllPHIVRegs) {
-    LiveInterval &PHILI = LIS.getInterval(PHIVReg);
+  for (MachineOperand* PHIVRes : AllPHIVResults) {
+    LiveInterval &PHILI = LIS.getInterval(PHIVRes->getReg());
     PHILI.RenumberValues();
   }
   
@@ -198,8 +203,8 @@ void MachineLaneSSAUpdater::performSSARepair(Register NewVReg, Register OrigVReg
   
   // Step 4: Update operand flags to match the LiveIntervals
   updateDeadFlags(NewVReg);
-  for (Register PHIVReg : AllPHIVRegs) {
-    updateDeadFlags(PHIVReg);
+  for (MachineOperand* PHIVRes : AllPHIVResults) {
+    updateDeadFlags(PHIVRes->getReg());
   }
   
   // Step 5: Verification if enabled
@@ -209,6 +214,7 @@ void MachineLaneSSAUpdater::performSSARepair(Register NewVReg, Register OrigVReg
   }
   
   LLVM_DEBUG(dbgs() << "  performSSARepair complete\n");
+  return AllPHIVResults;
 }
 
 //===----------------------------------------------------------------------===//
@@ -416,14 +422,13 @@ void MachineLaneSSAUpdater::computePrunedIDF(Register OrigVReg,
   // join blocks. The IDFCalculator handles deduplication automatically.
 }
 
-SmallVector<Register> MachineLaneSSAUpdater::insertLaneAwarePHI(Register InitialVReg,
-                                                                Register OrigVReg,
-                                                                LaneBitmask DefMask,
-                                                                MachineBasicBlock *InitialDefBB) {
+SmallVector<MachineOperand *> MachineLaneSSAUpdater::insertLaneAwarePHI(
+    Register InitialVReg, Register OrigVReg, LaneBitmask DefMask,
+    MachineBasicBlock *InitialDefBB) {
   LLVM_DEBUG(dbgs() << "MachineLaneSSAUpdater::insertLaneAwarePHI InitialVReg=" << InitialVReg
                     << " OrigVReg=" << OrigVReg << " DefMask=" << PrintLaneMask(DefMask) << "\n");
   
-  SmallVector<Register> AllCreatedPHIs;
+  SmallVector<MachineOperand*> AllCreatedPHIs;
   
   // Step 1: Compute IDF (Iterated Dominance Frontier) for the initial definition
   // This gives us ALL blocks where PHI nodes need to be inserted
@@ -446,14 +451,14 @@ SmallVector<Register> MachineLaneSSAUpdater::insertLaneAwarePHI(Register Initial
                       << " with CurrentNewVReg=" << CurrentNewVReg << "\n");
     
     // Create PHI: merges OrigVReg and CurrentNewVReg based on dominance
-    Register PHIResult = createPHIInBlock(*JoinMBB, OrigVReg, CurrentNewVReg, DefMask);
+    MachineOperand* PHIResult = createPHIInBlock(*JoinMBB, OrigVReg, CurrentNewVReg, DefMask);
     
-    if (PHIResult.isValid()) {
+    if (PHIResult) {
       AllCreatedPHIs.push_back(PHIResult);
       
       // Update CurrentNewVReg to be the PHI result
       // This ensures the next PHI (if any) uses this PHI's result, not the original InitialVReg
-      CurrentNewVReg = PHIResult;
+      CurrentNewVReg = PHIResult->getReg();
       
       LLVM_DEBUG(dbgs() << "    Created PHI result VReg=" << PHIResult 
                         << ", will use this for subsequent PHIs\n");
@@ -467,10 +472,10 @@ SmallVector<Register> MachineLaneSSAUpdater::insertLaneAwarePHI(Register Initial
 }
 
 // Helper: Create lane-specific PHI in a join block
-Register MachineLaneSSAUpdater::createPHIInBlock(MachineBasicBlock &JoinMBB,
-                                                 Register OrigVReg,
-                                                 Register NewVReg,
-                                                 LaneBitmask DefMask) {
+MachineOperand *
+MachineLaneSSAUpdater::createPHIInBlock(MachineBasicBlock &JoinMBB,
+                                        Register OrigVReg, Register NewVReg,
+                                        LaneBitmask DefMask) {
   LLVM_DEBUG(dbgs() << "    createPHIInBlock in BB#" << JoinMBB.getNumber()
                     << " OrigVReg=" << OrigVReg << " NewVReg=" << NewVReg 
                     << " DefMask=" << PrintLaneMask(DefMask) << "\n");
@@ -543,10 +548,10 @@ Register MachineLaneSSAUpdater::createPHIInBlock(MachineBasicBlock &JoinMBB,
     LLVM_DEBUG(dbgs() << "      Created lane-specific PHI: ");
     LLVM_DEBUG(PHI->print(dbgs()));
     
-    return PHIVReg;
+    return &PHINode->getOperand(0);
   }
   
-  return Register();
+  return nullptr;
 }
 
 void MachineLaneSSAUpdater::rewriteDominatedUses(Register OrigVReg,

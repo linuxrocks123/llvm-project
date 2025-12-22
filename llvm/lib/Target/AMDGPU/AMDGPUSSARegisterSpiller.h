@@ -91,6 +91,8 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   // for reachable but not dominated uses (divergent paths)
   DenseMap<MachineInstr *, SmallVector<MachineInstr *, 2>> SpillToReloadMap;
 
+  VRegMaskPairSet ReloadedRegs;
+
   // Register pressure limits (set during processFunction)
   unsigned VGPRLimit = 0;
   unsigned SGPRLimit = 0;
@@ -98,7 +100,13 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   // TODO: Add tracking for spilled/reloaded registers if needed for
   // verification
 
-  /// Returns a stack slot for the given VRegMaskPair, creating one if needed.
+  /// Inserts a virtual spill marker at the given position.
+  void insertVirtualSpillMarker(MachineBasicBlock &MBB,
+                                MachineBasicBlock::iterator I,
+                                VRegMaskPair VMP);
+
+  /// Returns a stack slot for the given VRegMaskPair, creating one if
+  /// needed.
   int assignVirt2StackSlot(VRegMaskPair VMP);
 
   /// Creates a spill slot for the given register class.
@@ -250,16 +258,26 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   /// Returns true if hoisting was performed
   bool tryHoistSpillToNCD(MachineInstr *KillMI, VRegMaskPair SpilledVMP,
                           const SmallVectorImpl<MachineInstr *> &ReachableUses);
-  
-  /// Splits the join block at the reload point, placing reload on spill-path edge only.
-  /// This ensures the reload executes only when arriving from the spill path, not the clean path.
-  /// MachineLaneSSAUpdater will automatically insert PHI at the merge point.
-  /// JoinBB is computed directly from CFG structure (no IDF needed).
-  /// Returns the reload instruction in the split block (same ReloadMI pointer, but in new block).
-  MachineInstr* splitBlockBeforeReload(MachineInstr *KillMI, 
-                                       MachineInstr *ReloadMI, 
-                                       VRegMaskPair SpilledVMP);
-  
+
+  /// Collects all dominated blocks of the given spill block.
+  void collectDominatedBlocks(MachineBasicBlock &SpillMBB,
+                              SmallVectorImpl<MachineBasicBlock *> &DomBBs) const;
+
+  void cutFromLiveRange(LiveRange &LR, SlotIndex CutStart, SlotIndex CutEnd);
+
+  void killIntervalInDominatedRegion(const SlotIndex &KillIdx, LiveInterval &LI);
+
+      /// Splits the join block at the reload point, placing reload on
+      /// spill-path edge only. This ensures the reload executes only when
+      /// arriving from the spill path, not the clean path.
+      /// MachineLaneSSAUpdater will automatically insert PHI at the merge
+      /// point. JoinBB is computed directly from CFG structure (no IDF needed).
+      /// Returns the reload instruction in the split block (same ReloadMI
+      /// pointer, but in new block).
+      MachineInstr *
+      splitBlockBeforeReload(MachineInstr *KillMI, MachineInstr *ReloadMI,
+                             VRegMaskPair SpilledVMP);
+
   /// Handles reachable but not dominated uses via split-before-use.
   /// With "store at definition", spills are correct (all lanes stored), so we only
   /// need to handle reload placement. No WWM needed since we store the same mask as defined.

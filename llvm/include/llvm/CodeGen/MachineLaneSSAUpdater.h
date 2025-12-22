@@ -16,6 +16,7 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"        // SmallVector
 #include "llvm/CodeGen/LiveInterval.h"    // LiveRange
+#include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/Register.h"       // Register
 #include "llvm/CodeGen/SlotIndexes.h"    // SlotIndex
 #include "llvm/CodeGen/TargetRegisterInfo.h" // For inline function
@@ -58,20 +59,24 @@ public:
       : MF(MF), LIS(LIS), MDT(MDT), TRI(TRI) {}
 
   // Repair SSA for a new definition that violates SSA form
-  // 
-  // Parameters:
-  //   NewDefMI: Instruction with a def operand that currently defines OrigVReg (violating SSA)
-  //   OrigVReg: The virtual register being redefined
   //
+  // Parameters:
+  //   NewDefMI: Instruction with a def operand that currently defines OrigVReg
+  //   (violating SSA) 
+  //   OrigVReg: The virtual register being redefined
+  //   PHIRegDefOps: A vector of def operands for the PHI registers that were
+  //   created
   // This function will:
   //   1. Find the def operand in NewDefMI that defines OrigVReg
   //   2. Derive the lane mask from the operand's subreg index (if any)
   //   3. Create a new virtual register with same class as OrigVReg
-  //   4. Replace the operand in NewDefMI to define the new vreg (preserving subreg index)
+  //   4. Replace the operand in NewDefMI to define the new vreg (preserving
+  //   subreg index)
   //   5. Perform SSA repair (insert PHIs, rewrite uses)
   //
   // Returns: The newly created SSA-repaired virtual register
-  Register repairSSAForNewDef(MachineInstr &NewDefMI, Register OrigVReg);
+  Register repairSSAForNewDef(MachineInstr &NewDefMI, Register OrigVReg,
+                              SmallVectorImpl<MachineOperand *> &PHIRegDefOps);
 
   /// Check if a use is reachable from a definition using IDF analysis.
   /// 
@@ -134,8 +139,11 @@ public:
 
 private:
   // Common SSA repair logic
-  void performSSARepair(Register NewVReg, Register OrigVReg, 
-                        LaneBitmask DefMask, MachineBasicBlock *DefBB);
+  // Returns a vector of MachineOperand pointers to the PHI result registers
+  SmallVector<MachineOperand *> performSSARepair(Register NewVReg,
+                                                     Register OrigVReg,
+                                                     LaneBitmask DefMask,
+                                                     MachineBasicBlock *DefBB);
 
   // Optional knobs (fluent style); no-ops until implemented in .cpp.
   MachineLaneSSAUpdater &setUndefEdgePolicy(bool MaterializeImplicitDef) {
@@ -165,13 +173,13 @@ private:
   // Insert lane-aware Machine PHIs with iterative worklist processing.
   // Seeds with InitialVReg definition, computes IDF, places PHIs, repeats until convergence.
   // Returns all PHI result registers created during the iteration.
-  SmallVector<Register> insertLaneAwarePHI(Register InitialVReg,
+  SmallVector<MachineOperand*> insertLaneAwarePHI(Register InitialVReg,
                                             Register OrigVReg,
                                             LaneBitmask DefMask,
                                             MachineBasicBlock *InitialDefBB);
 
   // Helper: Create PHI in a specific block with per-edge lane analysis
-  Register createPHIInBlock(MachineBasicBlock &JoinMBB,
+  MachineOperand* createPHIInBlock(MachineBasicBlock &JoinMBB,
                            Register OrigVReg,
                            Register NewVReg,
                            LaneBitmask DefMask);

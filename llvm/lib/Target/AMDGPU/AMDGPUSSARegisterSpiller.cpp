@@ -13,6 +13,8 @@
 #include "GCNSubtarget.h"
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "SIRegisterInfo.h"
+#include "VRegMaskPair.h"
+#include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -176,6 +178,10 @@ VRegMaskPairSet AMDGPUSSARegisterSpiller::convertLiveRegs(
   return Result;
 }
 
+Printable printVRegMaskPairSet(const VRegMaskPairSet &VMPSet) {
+  return Printable([&](raw_ostream &OS) { VMPSet.dump(); });
+}
+
 void AMDGPUSSARegisterSpiller::validateFinalRegisterPressure(
     MachineFunction &MF, unsigned RPLimit, bool IsVGPR) {
   
@@ -218,11 +224,7 @@ void AMDGPUSSARegisterSpiller::validateFinalRegisterPressure(
         OS << "  At instruction: " << MI << "\n";
         OS << "  In block: " << printMBBReference(*MBB) << "\n";
         OS << "\nThis indicates the spiller failed to keep RP within limits.\n";
-        OS << "Possible causes:\n";
-        OS << "  1. Reloads inserted on clean paths (needs split-before-use)\n";
-        OS << "  2. Insufficient spilling (selection algorithm issue)\n";
-        OS << "  3. LiveInterval not properly shrunk after spilling\n";
-        report_fatal_error(Twine(OS.str()));
+  report_fatal_error(Twine(OS.str()));
       }
     }
   }
@@ -254,6 +256,8 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
 
   // Traverse basic blocks in reverse post-order (RPO)
   ReversePostOrderTraversal<MachineFunction *> RPOT(&MF);
+
+  ReloadedRegs.clear();
 
   for (MachineBasicBlock *MBB : RPOT) {
     LLVM_DEBUG(dbgs() << "\nProcessing " << printMBBReference(*MBB) << "\n");
@@ -316,10 +320,17 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
         // Convert to VRegMaskPairSet for spill candidate selection
         VRegMaskPairSet ActiveRegs = convertLiveRegs(LiveRegsMap);
 
+        LLVM_DEBUG(dbgs() << "ActiveRegs: " << printVRegMaskPairSet(ActiveRegs) << "\n");
+        LLVM_DEBUG(dbgs() << "ReloadedRegs: " << printVRegMaskPairSet(ReloadedRegs) << "\n");
+        ActiveRegs.set_subtract(ReloadedRegs);
+        LLVM_DEBUG(dbgs() << "ActiveRegs after subtracting ReloadedRegs: "
+                          << printVRegMaskPairSet(ActiveRegs) << "\n");
+
         // CRITICAL: Exclude registers DEFINED by the current instruction!
         // RPTracker.reset(MI) gives us RP AFTER MI executes, which includes
-        // registers defined by MI. But we insert spills BEFORE MI, so we cannot
-        // spill a register that doesn't exist yet. We must exclude MI.defs().
+        // registers defined by MI. But we insert spills BEFORE MI, so we
+        // cannot spill a register that doesn't exist yet. We must exclude
+        // MI.defs().
         VRegMaskPairSet ToRemove;
         for (const MachineOperand &MO : MI.defs()) {
           if (MO.getReg().isVirtual()) {
@@ -337,10 +348,7 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
           }
         }
         // Remove them from active candidates
-        for (const auto &VMP : ToRemove) {
-          ActiveRegs.remove(VMP);
-        }
-
+        ActiveRegs.set_subtract(ToRemove);
 
         MachineBasicBlock::reverse_iterator ReverseI(std::next(I));
         
@@ -612,6 +620,40 @@ VRegMaskPairSet AMDGPUSSARegisterSpiller::getVMPsToSpill(
   return ToSpill;
 }
 
+void AMDGPUSSARegisterSpiller::insertVirtualSpillMarker(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+    VRegMaskPair VMP) {
+  // Avoid dropping a marker immediately after the actual spill store
+  // for the same VReg/Lane mask.
+  MachineInstr *PrevMI = nullptr;
+  if (I == MBB.end()) {
+    if (!MBB.empty()) {
+      auto PrevIt = MBB.end();
+      --PrevIt;
+      PrevMI = &*PrevIt;
+    }
+  } else if (I != MBB.begin()) {
+    auto PrevIt = I;
+    --PrevIt;
+    PrevMI = &*PrevIt;
+  }
+
+  if (!PrevMI || !isSpillInstr(PrevMI) || !usesSpilledVMP(PrevMI, VMP)) {
+    // Insert MIR-visible marker so tests can assert the virtual spill point.
+    DebugLoc SpillDL =
+        I == MBB.end() ? DebugLoc() : I->getDebugLoc();
+    MachineInstr *MarkerMI = BuildMI(MBB, I, SpillDL,
+                                     TII->get(AMDGPU::SI_VIRTUAL_SPILL_MARKER))
+                                 .addImm(VMP.getVReg().virtRegIndex())
+                                 .addImm(VMP.getLaneMask().getAsInteger());
+    LIS->InsertMachineInstrInMaps(*MarkerMI);
+  } else {
+    LLVM_DEBUG(
+        dbgs()
+        << "Skipping virtual spill marker (adjacent real spill of same VMP)\n");
+  }
+}
+
 bool AMDGPUSSARegisterSpiller::spillAndReload(
     MachineBasicBlock &MBB, MachineBasicBlock::reverse_iterator I,
     VRegMaskPairSet &Active, unsigned CurRP, unsigned RPLimit) {
@@ -665,40 +707,23 @@ bool AMDGPUSSARegisterSpiller::spillAndReload(
     }
 
     if (EnableVirtualSpillMarkers) {
-      // Avoid dropping a marker immediately after the actual spill store
-      // for the same VReg/Lane mask.
-      MachineInstr *PrevMI = nullptr;
-      if (SpillPos == MBB.end()) {
-        if (!MBB.empty()) {
-          auto PrevIt = MBB.end();
-          --PrevIt;
-          PrevMI = &*PrevIt;
+      if (I->isPHI()) {
+        LLVM_DEBUG(
+            dbgs() << "Virtual spill marker for PHI goes to predecessors\n");
+        for (auto *Pred : MBB.predecessors()) {
+          SpillPos = Pred->getFirstTerminator();
+          insertVirtualSpillMarker(*Pred, SpillPos, VMP);
         }
-      } else if (SpillPos != MBB.begin()) {
-        auto PrevIt = SpillPos;
-        --PrevIt;
-        PrevMI = &*PrevIt;
-      }
-
-      if (!PrevMI || !isSpillInstr(PrevMI) || !usesSpilledVMP(PrevMI, VMP)) {
-        // Insert MIR-visible marker so tests can assert the virtual spill point.
-        DebugLoc SpillDL =
-            SpillPos == MBB.end() ? DebugLoc() : SpillPos->getDebugLoc();
-        MachineInstr *MarkerMI =
-            BuildMI(MBB, SpillPos, SpillDL,
-                    TII->get(AMDGPU::SI_VIRTUAL_SPILL_MARKER))
-                .addImm(VReg.virtRegIndex())
-                .addImm(Mask.getAsInteger());
-        LIS->InsertMachineInstrInMaps(*MarkerMI);
       } else {
-        LLVM_DEBUG(dbgs()
-                   << "Skipping virtual spill marker (adjacent real spill of same VMP)\n");
+        insertVirtualSpillMarker(MBB, SpillPos, VMP);
       }
     }
     
     LLVM_DEBUG({
       dbgs() << "spillAndReload(): Virtual spill point (KillIdx): " << KillIdx << "\n";
     });
+
+    killIntervalInDominatedRegion(KillIdx, LIS->getInterval(VReg));
     
     // Step 2c: Get stack slot for reload phase
     int FI = assignVirt2StackSlot(VMP);
@@ -903,6 +928,12 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
       
       // Now repair SSA with the transformed CFG
       Register NewVReg = repairSSAForReload(ReloadMI, SpilledVMP);
+      MachineOperand *NewVRegOp =
+          ReloadMI->findRegisterDefOperand(NewVReg, TRI);
+      assert(NewVRegOp && "NewVReg not found in ReloadMI");
+      VRegMaskPair NewVMP(*NewVRegOp, TRI, MRI);
+
+      ReloadedRegs.insert(NewVMP);
       
       LLVM_DEBUG(dbgs() << "    SSA repair complete for reload, new register is "
                         << getRegNameForDebug(NewVReg, MRI, TRI) << "\n");
@@ -1268,19 +1299,17 @@ Register AMDGPUSSARegisterSpiller::repairSSAForReload(
   LLVM_DEBUG(dbgs() << "repairSSAForReload(): Repairing SSA for reload: " 
                     << *ReloadMI);
 
-  // Use class member SSA updater (shares IDF cache with reachability analysis)
-  Register NewVReg = SSAUpdater->repairSSAForNewDef(*ReloadMI, OrigVReg);
+                    SmallVector<MachineOperand *> PHIRegDefOps;
+                    // Use class member SSA updater (shares IDF cache with
+                    // reachability analysis)
+                    Register NewVReg = SSAUpdater->repairSSAForNewDef(
+                        *ReloadMI, OrigVReg, PHIRegDefOps);
 
-  LLVM_DEBUG(dbgs() << "repairSSAForReload(): SSA repaired, new register is "
-                    << printReg(NewVReg, TRI);
-             if (NewVReg.isVirtual()) {
-               StringRef Name = MRI->getVRegName(NewVReg);
-               if (!Name.empty())
-                 dbgs() << " (%" << Name << ")";
-             }
-             dbgs() << "\n");
+                    for (auto *PHIRegDefOp : PHIRegDefOps) {
+                      ReloadedRegs.insert(VRegMaskPair(*PHIRegDefOp, TRI, MRI));
+                    }
 
-  return NewVReg;
+                    return NewVReg;
 }
 
 Register AMDGPUSSARegisterSpiller::reloadBefore(
@@ -1489,6 +1518,66 @@ bool AMDGPUSSARegisterSpiller::tryHoistSpillToNCD(
   LLVM_DEBUG(dbgs() << "  Hoisted kill point to: " << printMBBReference(*NCD) << "\n");
   
   return true;
+}
+
+void AMDGPUSSARegisterSpiller::collectDominatedBlocks(
+    MachineBasicBlock &SpillMBB, SmallVectorImpl<MachineBasicBlock *> &DomBBs) const{
+  DomTreeNodeBase<MachineBasicBlock> *Node = DT->getNode(&SpillMBB);
+  if (Node) {
+    for (auto *DN : depth_first(Node)) {
+      DomBBs.push_back(DN->getBlock());
+    }
+  }
+}
+
+void AMDGPUSSARegisterSpiller::cutFromLiveRange(LiveRange &LR, SlotIndex CutStart, SlotIndex CutEnd) {
+  if (!(CutStart < CutEnd))
+    return;
+
+  SmallVector<LiveRange::Segment, 16> Segs(LR.segments.begin(),
+                                           LR.segments.end());
+
+  for (const auto &S : Segs) {
+    if (S.end <= CutStart || CutEnd <= S.start)
+      continue; // no overlap
+
+    // Remove the original.
+    LR.removeSegment(S);
+
+    // Keep left piece if any: [S.start, CutStart)
+    if (S.start < CutStart)
+      LR.addSegment(LiveRange::Segment(S.start, CutStart, S.valno));
+
+    // Keep right piece if any: [CutEnd, S.end)
+    if (CutEnd < S.end)
+      LR.addSegment(LiveRange::Segment(CutEnd, S.end, S.valno));
+  }
+}
+
+void AMDGPUSSARegisterSpiller::killIntervalInDominatedRegion(
+    const SlotIndex &KillIdx, LiveInterval &LI) {
+  MachineInstr *KillMI = Indexes->getInstructionFromIndex(KillIdx);
+  if (KillMI) {
+    MachineBasicBlock *KillBB = KillMI->getParent();
+    SmallVector<MachineBasicBlock *, 4> DomBBs;
+    collectDominatedBlocks(*KillBB, DomBBs);
+    SlotIndex SpillCutStart = KillIdx.getRegSlot();
+    SlotIndex SpillBBEnd = LIS->getMBBEndIdx(KillBB);
+    cutFromLiveRange(LI, SpillCutStart, SpillBBEnd);
+    for (auto &SR : LI.subranges())
+      cutFromLiveRange(SR, SpillCutStart, SpillBBEnd);
+    for (MachineBasicBlock *MBB : DomBBs) {
+      if (MBB == KillBB)
+        continue;
+
+      SlotIndex B = LIS->getMBBStartIdx(MBB);
+      SlotIndex E = LIS->getMBBEndIdx(MBB);
+
+      cutFromLiveRange(LI, B, E);
+      for (auto &SR : LI.subranges())
+        cutFromLiveRange(SR, B, E);
+    }
+  }
 }
 
 MachineInstr* AMDGPUSSARegisterSpiller::splitBlockBeforeReload(
@@ -1735,6 +1824,8 @@ bool AMDGPUSSARegisterSpiller::runOnMachineFunction(MachineFunction &MF) {
   // Return true if either pass made modifications
   return ChangedSGPR || ChangedVGPR;
 }
+
+
 
 // Create function for pass manager
 MachineFunctionPass *llvm::createAMDGPUSSARegisterSpillerPass() {
