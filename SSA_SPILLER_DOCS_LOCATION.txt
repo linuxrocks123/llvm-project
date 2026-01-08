@@ -1,0 +1,22 @@
+SSA Register Spiller Development Documentation
+==============================================
+
+All project documentation has been moved to keep the llvm-project tree clean:
+
+Location: ../ssa-spiller-docs/
+
+Key Files:
+- NOTES.md                      - Complete technical diary and current status
+- APPROVAL_CHECKLIST.md         - Source change approval workflow
+- IMPLEMENTATION_PLAN.md        - Implementation plan and design
+- SPILL_PLACEMENT_DESIGN.md     - Spill placement algorithms
+
+To access documentation:
+  cd ../ssa-spiller-docs
+  ls -la
+
+Workspace rules (.cursor/rules/) remain in llvm-project as they are workspace-specific.
+
+
+
+

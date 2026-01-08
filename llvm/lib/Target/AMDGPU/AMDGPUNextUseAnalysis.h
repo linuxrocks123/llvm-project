@@ -1,9 +1,15 @@
-//===- AMDGPUNextUseAnalysis.h ----------------------------------------*- C++-
-//*-===//
+//===-- AMDGPUNextUseAnalysis.h - Next Use Analysis ------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+/// \file
+/// This file defines the Next Use Analysis for AMDGPU targets, which computes
+/// distances to next uses of virtual registers to guide register allocation
+/// and spilling decisions.
 //
 //===----------------------------------------------------------------------===//
 
@@ -14,7 +20,6 @@
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/SlotIndexes.h"
 
-#include "AMDGPUSSARAUtils.h"
 #include "GCNSubtarget.h"
 #include "SIRegisterInfo.h"
 #include "VRegMaskPair.h"
@@ -27,13 +32,6 @@ using namespace llvm;
 
 // namespace {
 
-// Helper function for rebasing successor distances into current block frame
-static inline int64_t rebaseFromSucc(int64_t SuccStored, unsigned SuccEntryOff,
-                                     int64_t EdgeWeight /*0 or LoopTag*/) {
-  // Move succ-relative value into "current block end" frame.
-  return (int64_t)SuccStored + (int64_t)SuccEntryOff + (int64_t)EdgeWeight;
-}
-
 class NextUseResult {
   friend class AMDGPUNextUseAnalysisWrapper;
   SlotIndexes *Indexes;
@@ -41,9 +39,12 @@ class NextUseResult {
   const SIRegisterInfo *TRI;
   MachineLoopInfo *LI;
 
+public:
   class VRegDistances {
-
+  public:
     using Record = std::pair<LaneBitmask, int64_t>;
+
+  private:
     struct CompareByDist {
       bool operator()(const Record &LHS, const Record &RHS) const {
         if (LHS.second != RHS.second)     // Different distances
@@ -55,21 +56,24 @@ class NextUseResult {
 
   public:
     using SortedRecords = std::set<Record, CompareByDist>;
+    using iterator = DenseMap<unsigned, SortedRecords>::iterator;
+    using const_iterator = DenseMap<unsigned, SortedRecords>::const_iterator;
 
   private:
     DenseMap<unsigned, SortedRecords> NextUseMap;
 
   public:
-    auto begin() { return NextUseMap.begin(); }
-    auto end() { return NextUseMap.end(); }
+    iterator begin() { return NextUseMap.begin(); }
+    iterator end() { return NextUseMap.end(); }
 
-    auto begin() const { return NextUseMap.begin(); }
-    auto end() const { return NextUseMap.end(); }
+    const_iterator begin() const { return NextUseMap.begin(); }
+    const_iterator end() const { return NextUseMap.end(); }
 
     size_t size() const { return NextUseMap.size(); }
     std::pair<bool, SortedRecords> get(unsigned Key) const {
-      if (NextUseMap.contains(Key))
-        return {true, NextUseMap.find(Key)->second};
+      const_iterator It = NextUseMap.find(Key);
+      if (It != NextUseMap.end())
+        return {true, It->second};
       return {false, SortedRecords()};
     }
 
@@ -77,49 +81,74 @@ class NextUseResult {
 
     SmallVector<unsigned> keys() {
       SmallVector<unsigned> Keys;
-      for (auto P : NextUseMap)
-        Keys.push_back(P.first);
+      for (auto &[Key, Recs] : NextUseMap)
+        Keys.push_back(Key);
       return Keys;
     }
 
-    bool contains(unsigned Key) { return NextUseMap.contains(Key); }
+    bool contains(unsigned Key) const { return NextUseMap.contains(Key); }
+
+    iterator find(unsigned Key) { return NextUseMap.find(Key); }
+
+    // Compare two stored distances: returns true if A is closer or equal to B.
+    // Handles mixed-sign values correctly:
+    // - Negative stored values (finite distances): larger (less negative) =
+    // closer
+    // - Non-negative stored values (LoopTag distances): smaller = closer
+    // - Mixed: negative (finite) is always closer than non-negative
+    // (loop-tagged)
+    // TODO: Investigate making LoopTag/DeadTag negative for consistent sign
+    // convention
+    static bool isCloserOrEqual(int64_t A, int64_t B) {
+      // Both negative (finite): larger = closer
+      if (A < 0 && B < 0)
+        return A >= B;
+      // Both non-negative (loop-tagged): smaller = closer
+      if (A >= 0 && B >= 0)
+        return A <= B;
+      // Mixed: negative (finite) is always closer than non-negative
+      // (loop-tagged)
+      return A < 0;
+    }
 
     bool insert(VRegMaskPair VMP, int64_t Dist) {
       Record R(VMP.getLaneMask(), Dist);
-      if (NextUseMap.contains(VMP.getVReg())) {
-        SortedRecords &Dists = NextUseMap[VMP.getVReg()];
+      iterator MapIt = NextUseMap.find(VMP.getVReg());
+      if (MapIt != NextUseMap.end()) {
+        SortedRecords &Dists = MapIt->second;
 
         if (Dists.find(R) == Dists.end()) {
           SmallVector<SortedRecords::iterator, 4> ToErase;
 
-          for (auto It = Dists.begin(); It != Dists.end(); ++It) {
+          for (SortedRecords::iterator It = Dists.begin(); It != Dists.end();
+               ++It) {
             const Record &D = *It;
 
             // Check if existing use covers the new use
             if ((R.first & D.first) == R.first) {
-              // Existing use covers new use
-              if (D.second <= R.second) {
-                // Existing use is closer or equal → reject new use
+              // Existing use covers new use - keep if existing is closer
+              if (isCloserOrEqual(D.second, R.second)) {
+                // Existing use is closer or equal -> reject new use
                 return false;
               }
-              // Existing use is further → continue (might replace it)
+              // Existing use is further -> continue (might replace it)
             }
 
             // Check if new use covers existing use
             if ((D.first & R.first) == D.first) {
-              // New use covers existing use
-              if (R.second <= D.second) {
-                // New use is closer → mark existing for removal
+              // New use covers existing use - evict if new is closer
+              if (isCloserOrEqual(R.second, D.second)) {
+                // New use is closer -> mark existing for removal
                 ToErase.push_back(It);
               } else {
-                // New use is further → reject it
+                // New use is further -> reject it
                 return false;
               }
             }
           }
 
           // Remove all records that the new use supersedes
-          for (auto It : ToErase) {
+          for (SortedRecords::iterator It : ToErase) {
             Dists.erase(It);
           }
 
@@ -133,9 +162,10 @@ class NextUseResult {
     }
 
     void clear(VRegMaskPair VMP) {
-      if (NextUseMap.contains(VMP.getVReg())) {
-        auto &Dists = NextUseMap[VMP.getVReg()];
-        for (auto It = Dists.begin(); It != Dists.end(); ) {
+      iterator MapIt = NextUseMap.find(VMP.getVReg());
+      if (MapIt != NextUseMap.end()) {
+        SortedRecords &Dists = MapIt->second;
+        for (SortedRecords::iterator It = Dists.begin(); It != Dists.end();) {
           LaneBitmask Masked = It->first & ~VMP.getLaneMask();
           if (Masked.none()) {
             It = Dists.erase(It);
@@ -153,17 +183,16 @@ class NextUseResult {
       if (Other.size() != size())
         return false;
 
-      for (auto P : NextUseMap) {
+      for (auto &[Key, Dists] : NextUseMap) {
 
-        std::pair<bool, SortedRecords> OtherDists = Other.get(P.getFirst());
+        std::pair<bool, SortedRecords> OtherDists = Other.get(Key);
         if (!OtherDists.first)
           return false;
-        SortedRecords &Dists = P.getSecond();
 
         if (Dists.size() != OtherDists.second.size())
           return false;
 
-        for (auto R : OtherDists.second) {
+        for (const Record &R : OtherDists.second) {
           SortedRecords::iterator I = Dists.find(R);
           if (I == Dists.end())
             return false;
@@ -180,31 +209,16 @@ class NextUseResult {
     }
 
     // Adjust 'Other' (which is in successor's frame) into *this* frame,
-    // then take pointwise min by LaneBitmask.
+    // then merge using insert's coverage logic.
     void merge(const VRegDistances &Other, unsigned SuccEntryOff,
                int64_t EdgeWeight = 0) {
-      for (const auto &P : Other) {
-        unsigned Key = P.getFirst();
-        const auto &OtherDists = P.getSecond();
-        auto &MineDists = NextUseMap[Key]; // creates empty if not present
+      for (const auto &[Key, OtherDists] : Other) {
 
-        for (const auto &D : OtherDists) {
-          // D.second is the successor's STORED value (signed, relative to succ)
-          int64_t Rebased = rebaseFromSucc(D.second, SuccEntryOff, EdgeWeight);
-
-          // Try to find existing record with the same LaneBitmask
-          auto It =
-              std::find_if(MineDists.begin(), MineDists.end(),
-                           [&](const Record &R) { return R.first == D.first; });
-
-          if (It == MineDists.end()) {
-            // No record → insert
-            MineDists.insert({D.first, Rebased});
-          } else if (It->second > Rebased) { // take MIN in the current frame
-            // Furthest wins (adjusted is more distant) → replace
-            MineDists.erase(It);
-            MineDists.insert({D.first, Rebased});
-          }
+        for (const Record &D : OtherDists) {
+          // Rebase from successor's frame into current block end frame
+          int64_t Rebased = D.second + SuccEntryOff + EdgeWeight;
+          // Use insert's coverage logic for consistent handling
+          insert(VRegMaskPair(Register(Key), D.first), Rebased);
         }
       }
     }
@@ -225,16 +239,15 @@ class NextUseResult {
 public:
 private:
   DenseMap<unsigned, VRegMaskPairSet> UsedInBlock;
-  DenseMap<int, int> LoopExits;
+  DenseMap<unsigned, unsigned> LoopExits;
   // Signed tag used to mark "outside current loop" in stored values.
   // Must be >> any finite distance you can accumulate in one function.
   static constexpr int64_t LoopTag = (int64_t)1 << 40; // ~1e12 headroom
   static constexpr int64_t DeadTag = (int64_t)1 << 60; // ~1e18, >> LoopTag
 
-  // Unsigned Infinity for external API/DAG users who want a sentinel.
-  static constexpr unsigned PrintedInfinity = std::numeric_limits<unsigned>::max();
+  // Sentinel returned by getNextUseDistance() for dead/unused registers.
+  static constexpr unsigned DeadDistance = std::numeric_limits<uint16_t>::max();
 
-  const uint16_t Infinity = std::numeric_limits<unsigned short>::max();
   void init(const MachineFunction &MF);
   void analyze(const MachineFunction &MF);
 
@@ -249,9 +262,9 @@ private:
   struct PrintDist {
     bool IsInfinity;
     bool IsDead;
-    int64_t LoopMultiplier;  // How many LoopTags are in the distance
-    int64_t Rema;            // remainder after extracting LoopTags
-    
+    int64_t LoopMultiplier; // How many LoopTags are in the distance
+    int64_t Rema;           // remainder after extracting LoopTags
+
     PrintDist(int64_t Mat64) {
       if (Mat64 >= DeadTag) {
         IsInfinity = false;
@@ -273,8 +286,9 @@ private:
     }
   };
 
-  // Materializer for spiller use: applies three-tier ranking system
-  unsigned materializeForRank(int64_t Stored, unsigned SnapshotOffset) const;
+  /// Convert stored distance to spiller ranking. See .cpp for documentation.
+  unsigned materializeForSpillRanking(int64_t StoredDistance,
+                                      unsigned SnapshotOffset) const;
 
   // Materializer for printing: returns PrintDist structure
   PrintDist materializeForPrint(int64_t Stored, unsigned SnapshotOffset) const {
@@ -290,9 +304,8 @@ private:
                           StringRef Indent = "      ") const {
     bool Any = false;
     O << "\n";
-    for (const auto &X : Records) {
-      const LaneBitmask UseMask = X.first;
-      const int64_t Stored = X.second; // stored relative (may be negative)
+    for (const auto &[UseMask, Stored] : Records) {
+      // Stored is relative (may be negative)
 
       // Use enhanced materialization for display that shows three-tier
       // structure
@@ -302,7 +315,7 @@ private:
       O << Indent << "Vreg: ";
       const LaneBitmask FullMask = MRI->getMaxLaneMaskForVReg(VReg);
       if (UseMask != FullMask) {
-        const unsigned SubRegIdx = getSubRegIndexForLaneMask(UseMask, TRI);
+        const unsigned SubRegIdx = TRI->getSubRegIndexForLaneMask(UseMask);
         O << printReg(VReg, TRI, SubRegIdx, MRI);
       } else {
         O << printReg(VReg, TRI);
@@ -314,7 +327,8 @@ private:
         if (PDist.LoopMultiplier == 1)
           O << "[ LoopTag+" << PDist.Rema << " ]\n";
         else if (PDist.LoopMultiplier > 1)
-          O << "[ LoopTag*" << PDist.LoopMultiplier << "+" << PDist.Rema << " ]\n";
+          O << "[ LoopTag*" << PDist.LoopMultiplier << "+" << PDist.Rema
+            << " ]\n";
         else
           O << "[ INF+" << PDist.Rema << " ]\n";
       else
@@ -332,9 +346,9 @@ private:
                           int64_t EdgeWeight = 0, raw_ostream &O = dbgs(),
                           StringRef Indent = "      ") const {
     bool Any = false;
-    for (const auto &P : D) {
-      Any |= printSortedRecords(P.second, P.first, SnapshotOffset, EdgeWeight,
-                                O, Indent);
+    for (const auto &[VReg, Recs] : D) {
+      Any |=
+          printSortedRecords(Recs, VReg, SnapshotOffset, EdgeWeight, O, Indent);
     }
     return Any;
   }
@@ -381,19 +395,8 @@ public:
               const VRegMaskPair VMP) {
     if (!VMP.getVReg().isVirtual())
       report_fatal_error("Only virtual registers allowed!\n", true);
-    // FIXME: We use the same Infinity value to indicate both invalid distance
-    // and too long for out of block values. It is okay if the use out of block
-    // is at least one instruction further then the end of loop exit. In this
-    // case we have a distance Infinity + 1 and hence register is not considered
-    // dead. What if the register is defined by the last instruction in the loop
-    // exit block and out of loop use is in PHI? By design the dist of all PHIs
-    // from the beginning of block are ZERO and hence the distance of
-    // out-of-the-loop use will be exactly Infinity So, the register will be
-    // mistakenly considered DEAD! On another hand, any predecessor of the block
-    // containing PHI must have a branch as the last instruction. In this case
-    // the current design works.
-    return I == MBB.end() ? getNextUseDistance(MBB, VMP) == Infinity
-                          : getNextUseDistance(I, VMP) == Infinity;
+    return I == MBB.end() ? getNextUseDistance(MBB, VMP) == DeadDistance
+                          : getNextUseDistance(I, VMP) == DeadDistance;
   }
 
   VRegMaskPairSet &usedInBlock(MachineBasicBlock &MBB) {

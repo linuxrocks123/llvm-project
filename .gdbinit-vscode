@@ -1,0 +1,20 @@
+# GDB initialization for VSCode/Cursor debugging
+# This file is sourced via launch.json setupCommands
+
+# Load LLVM debugging helpers
+python
+import sys
+sys.path.insert(0, '/work/atimofee/sandbox/scripts')
+try:
+    exec(open('/work/atimofee/sandbox/scripts/llvm-gdb-helpers.py').read())
+except Exception as e:
+    print(f"⚠️  Failed to load LLVM GDB helpers: {e}")
+end
+
+# Set output styling
+set print pretty on
+set pagination off
+
+
+
+

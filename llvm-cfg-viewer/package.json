@@ -1,0 +1,125 @@
+{
+  "name": "llvm-cfg-viewer",
+  "displayName": "LLVM CFG Viewer",
+  "description": "Visualize LLVM MachineFunction CFGs during debugging sessions",
+  "version": "0.1.0",
+  "publisher": "llvm-dev",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Debuggers",
+    "Visualization"
+  ],
+  "activationEvents": [
+    "onDebug",
+    "onCommand:llvmCfg.viewCFG",
+    "onCommand:llvmCfg.viewCFGOnly",
+    "onCommand:llvmCfg.convertLatest",
+    "onCommand:llvmCfg.openExternal"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "llvmCfg.viewCFG",
+        "title": "LLVM: View CFG",
+        "category": "LLVM CFG"
+      },
+      {
+        "command": "llvmCfg.viewCFGOnly",
+        "title": "LLVM: View CFG (Structure Only)",
+        "category": "LLVM CFG"
+      },
+      {
+        "command": "llvmCfg.convertLatest",
+        "title": "LLVM: Convert Latest DOT File",
+        "category": "LLVM CFG"
+      },
+      {
+        "command": "llvmCfg.openExternal",
+        "title": "LLVM: Open CFG in External Browser",
+        "category": "LLVM CFG"
+      },
+      {
+        "command": "llvmCfg.showPanel",
+        "title": "LLVM: Show CFG Panel",
+        "category": "LLVM CFG"
+      }
+    ],
+    "configuration": {
+      "title": "LLVM CFG Viewer",
+      "properties": {
+        "llvmCfg.viewerMode": {
+          "type": "string",
+          "default": "panel",
+          "enum": [
+            "panel",
+            "browser",
+            "system"
+          ],
+          "enumDescriptions": [
+            "Display in integrated VSCode panel",
+            "Open in default web browser",
+            "Open with system viewer (xdg-open)"
+          ],
+          "description": "How to display CFG graphs"
+        },
+        "llvmCfg.graphvizPath": {
+          "type": "string",
+          "default": "dot",
+          "description": "Path to Graphviz 'dot' binary"
+        },
+        "llvmCfg.watchDirectory": {
+          "type": "string",
+          "default": "/tmp",
+          "description": "Directory to watch for DOT files"
+        },
+        "llvmCfg.autoConvert": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically convert DOT files when detected"
+        },
+        "llvmCfg.maxGraphsPerFunction": {
+          "type": "number",
+          "default": 10,
+          "description": "Maximum number of graphs to keep per function"
+        }
+      }
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "llvmCfg.viewCFG",
+          "when": "inDebugMode"
+        },
+        {
+          "command": "llvmCfg.viewCFGOnly",
+          "when": "inDebugMode"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.74.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "dependencies": {
+    "chokidar": "^3.5.3"
+  }
+}
+
+
+

@@ -1,0 +1,16 @@
+## SSA Spiller Crash Reproduction Rule
+
+- Whenever a SSASpiller MIR test crashes, asserts, or segfaults while running under `llvm/test/CodeGen/AMDGPU/SSASpiller`, immediately reproduce it in `/work/atimofee/sandbox/bugs/ssa-spiller/tests/spiller`.
+- Steps:
+  1. `cp` the failing `.mir` from `llvm/test/CodeGen/AMDGPU/SSASpiller/` into `/work/atimofee/sandbox/bugs/ssa-spiller/tests/spiller/`.
+  2. `cd /work/atimofee/sandbox/bugs/ssa-spiller/tests/spiller`.
+  3. Run `/work/atimofee/sandbox/github/llvm-project/build/Debug/bin/llc` with the exact RUN line from the test (including all flags such as `--amdgpu-ssa-spill-markers=1`) and pipe into FileCheck if the RUN line does so.
+- Always follow this protocol before debugging the failure further.
+
+## SSA Spiller LIT Invocation Rule
+
+- When running the SSASpiller LIT tests, always execute them directly from the test directory.
+- Steps:
+  1. `cd /work/atimofee/sandbox/github/llvm-project/llvm/test/CodeGen/AMDGPU/SSASpiller`
+  2. Run `/work/atimofee/sandbox/github/llvm-project/build/Debug/bin/llvm-lit -v .` (note the trailing dot for “current directory”).
+- Use this command instead of ninja shortcuts to ensure we exercise exactly the SSASpiller tests.

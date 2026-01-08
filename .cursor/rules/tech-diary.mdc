@@ -1,0 +1,91 @@
+---
+alwaysApply: true
+tags:
+  - documentation
+  - technical diary
+  - persistent memory
+scope: project
+file: NOTES.md
+format: markdown
+---
+## Maintain a Living Technical Diary
+
+**Purpose:**  
+Transform the AI assistant into a persistent collaborator that maintains structured technical notes throughout each session.
+
+**Instruction:**  
+Maintain a file named `NOTES.md` in the project root as a **technical diary**.  
+Whenever I'm working on debugging, design, or development tasks, you must help me update this file.
+
+### ⚠️ NOTES.md is EXEMPT from Approval Rules
+
+**NOTES.md does NOT require approval.** The AI should:
+- Update NOTES.md **immediately** after completing any substantial work
+- Update NOTES.md **during** discussions to capture decisions/discoveries
+- **NEVER** ask for approval for NOTES.md changes
+- Apply updates directly without showing diffs first
+
+### Automatic Logging Triggers
+
+The AI MUST update NOTES.md (without asking) after:
+- Any code change is approved and applied
+- Any significant debugging discovery
+- Any design decision is made
+- Any reviewer feedback is addressed
+- End of substantial discussion/session
+
+**Do NOT wait for user to ask "update diary?" - proactively log.**
+
+### Format Rules:
+- Add a new section each day, titled with the current date (e.g., `### 2025-10-21 – SSA Spiller Investigation`).  
+- Use Markdown bullets:
+  - **Context / goal**
+  - **Attempts / hypotheses**
+  - **Results / discoveries**
+  - **Decisions / rationale**
+  - **Next actions**
+- Include relevant code, logs, or commands if helpful.
+- Never delete previous sections — always append.
+- When resuming work, summarize the latest diary section to reestablish context.
+
+### Tagging System (for downstream parsing)
+
+NOTES.md entries are parsed by another LLM to extract documentation. Use these tags to aid routing:
+
+**Entry Type Tags** (in section header):
+| Tag | Meaning | Routes to... |
+|-----|---------|--------------|
+| `[BUGFIX]` | Bug discovered and fixed | Bug fixes, changelog |
+| `[FEATURE]` | New feature/capability | Feature docs, changelog |
+| `[REFACTOR]` | Code cleanup, no behavior change | Internal notes |
+| `[DESIGN]` | Design decision with rationale | Architecture docs |
+| `[API]` | API change (new/modified/removed) | API reference |
+| `[TEST]` | Test changes/additions | Test documentation |
+| `[REVIEW]` | Code review feedback addressed | PR notes |
+| `[PERF]` | Performance improvement | Performance guide |
+| `[BREAKING]` | Breaking change | Migration guide |
+
+**Component Tags** (optional, in header):
+`[NUA]`, `[SPILLER]`, `[CFG-VIEWER]`, `[SSAUPDATER]`, `[VREGMASK]`, etc.
+
+**Item-Level Tags** (inline with bullets for granular routing):
+```markdown
+- **[BUGFIX]** Fixed comparison logic in `insert()`
+- **[REFACTOR]** Renamed `Infinity` → `DeadDistance`
+```
+
+**Format Example:**
+```markdown
+### 2025-12-08 – NUA Code Review Cleanup [REVIEW] [REFACTOR] [NUA]
+
+- **Context / goal**
+  - Address reviewer feedback on naming
+
+- **Changes applied**
+  - **[REFACTOR]** Renamed `Infinity` → `DeadDistance`
+  - **[BUGFIX]** Fixed signed/unsigned warning
+```
+
+**Goal:**  
+Make `NOTES.md` a living log that captures what was done, why, and what's next.  
+This log should help reconstruct technical context after breaks and simplify PR and design documentation later.

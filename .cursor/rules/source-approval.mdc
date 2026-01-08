@@ -1,0 +1,119 @@
+---
+alwaysApply: true
+tags:
+  - safety
+  - source-modification
+  - approval-protocol
+scope: project
+format: markdown
+---
+
+## No Source Changes Without Approval
+
+**The Rule:**
+**NEVER modify, create, delete, move, or rename any source files until explicit approval is received.**
+
+### ⚠️ EXCEPTION: NOTES.md
+
+**`NOTES.md` is COMPLETELY EXEMPT from this rule.**  
+The AI should update NOTES.md immediately and automatically after any substantial work.  
+See `tech-diary.mdc` for NOTES.md logging requirements.
+
+### Pre-Modification Checklist
+
+Before calling `search_replace` or `write`, the AI MUST verify:
+
+#### ✅ 1. Check for Explicit Approval Keyword
+- [ ] Does the user's message start with `APPROVED:` followed by a description?
+- [ ] Example: `APPROVED: fix dominance check` or `APPROVED: add helper function`
+
+**If NO → STOP and show a diff/proposal instead**
+
+#### ✅ 2. Verify Approval Matches Intent
+- [ ] Does the approval description match what I'm about to do?
+- [ ] If user approved "fix typo" but I'm about to refactor, STOP and ask
+
+**If MISMATCH → STOP and clarify with user**
+
+#### ✅ 3. Context Check
+- [ ] Is this a continuation of a previously approved change?
+- [ ] Did the user modify files since approval? (check for conflicts)
+- [ ] If context changed, re-approval needed
+
+**If CONTEXT CHANGED → STOP and ask for re-approval**
+
+### When NOT to Ask for Approval
+
+The following actions do NOT require approval:
+
+1. **Tool execution**: Running `run_terminal_cmd`, `read_file`, `grep`, `codebase_search`
+2. **Analysis**: Reading and analyzing code
+3. **TODO management**: Updating TODO list with `todo_write`
+4. **Documentation updates**: Updating `NOTES.md` after work is complete (not source changes)
+
+### Approval Protocol Violations
+
+#### Common Triggers That Should NOT Auto-Apply:
+- ❌ "Good morning! I found a bug here..." → Show diff first
+- ❌ "This looks wrong, let's fix it" → Show diff first  
+- ❌ "You're right, that's the problem" → Show diff first
+- ❌ Pointing to code with explanation → Show diff first
+- ❌ Any conversational debugging → Show diff first
+
+#### ONLY Auto-Apply When:
+- ✅ Message starts with `APPROVED: <description>`
+- ✅ Context hasn't changed since showing the diff
+- ✅ Approval description matches the planned change
+
+### Response Templates
+
+#### When Proposing a Change:
+```
+## Proposed Change: [Brief Description]
+
+**File:** `path/to/file.cpp`
+
+**Change:**
+[Show unified diff or code block]
+
+**Rationale:**
+[Explain why this change is needed]
+
+**Please reply with:** `APPROVED: [brief description]` to apply this change.
+```
+
+#### When Blocked by Rule:
+```
+I cannot make this change without explicit approval.
+
+**What I want to do:**
+[Describe the change]
+
+**Proposed diff:**
+[Show the diff]
+
+**Please reply with:** `APPROVED: [description]` if you want me to proceed.
+```
+
+### Self-Check Before Every Modification
+
+**BEFORE calling `search_replace` or `write`, ask yourself:**
+
+1. Did I see `APPROVED:` in the latest user message?
+2. Does the approval match what I'm about to do?
+3. Has the context/file changed since approval?
+
+**If ANY answer is NO → SHOW DIFF INSTEAD OF APPLYING**
+
+### Exception Handling
+
+- **User Says "Go ahead" or "Do it"** → **This is NOT explicit approval!** Ask for `APPROVED: <description>` format.
+- **User Says "Fix it"** → **Too vague!** Show the diff and ask for explicit approval.
+- **User Modifies File During Discussion** → **Re-approval required!** The original approval is invalidated.
+
+### Implementation Notes
+
+This checklist should be mentally executed before EVERY file modification operation.
+The AI should err on the side of caution - when in doubt, show a diff first.
+
+**Remember:** The user prefers seeing diffs over having changes auto-applied without review.
