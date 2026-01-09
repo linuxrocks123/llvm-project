@@ -63,7 +63,7 @@ body: |
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT:   S_NOP 0, implicit [[COPY]]
   ; CHECK-NEXT:   [[DEF:%[0-9]+]]:vreg_64 = IMPLICIT_DEF
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER 0, 255
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %0, 00000000000000FF
   ; CHECK-NEXT:   [[DEF1:%[0-9]+]]:vreg_64 = IMPLICIT_DEF
   ; CHECK-NEXT:   S_NOP 0, implicit [[DEF]], implicit [[DEF1]]
   ; CHECK-NEXT:   S_BRANCH %bb.3

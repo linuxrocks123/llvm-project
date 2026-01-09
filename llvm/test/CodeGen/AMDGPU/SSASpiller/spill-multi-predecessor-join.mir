@@ -61,7 +61,7 @@ body: |
   ; CHECK-NEXT: bb.1.path_a:
   ; CHECK-NEXT:   successors: %bb.3(0x80000000)
   ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER 0, 255
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %0, 00000000000000FF
   ; CHECK-NEXT:   [[DEF:%[0-9]+]]:vreg_128 = IMPLICIT_DEF
   ; CHECK-NEXT:   S_NOP 0, implicit [[DEF]]
   ; CHECK-NEXT:   S_BRANCH %bb.3

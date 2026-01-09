@@ -100,7 +100,7 @@ body:             |
   ; CHECK-NEXT:   successors: %bb.2(0x80000000)
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT:   [[S_MOV_B64_:%[0-9]+]]:sreg_64_xexec = S_MOV_B64 -1
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER 1, 240
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %1, 00000000000000F0
   ; CHECK-NEXT:   [[DEF:%[0-9]+]]:vreg_128 = IMPLICIT_DEF
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT: bb.2.Flow:

@@ -13,6 +13,7 @@
 
 #include "AMDGPUMIRFormatter.h"
 #include "SIMachineFunctionInfo.h"
+#include "llvm/MC/LaneBitmask.h"
 
 using namespace llvm;
 
@@ -23,6 +24,15 @@ void AMDGPUMIRFormatter::printImm(raw_ostream &OS, const MachineInstr &MI,
   case AMDGPU::S_DELAY_ALU:
     assert(OpIdx == 0);
     printSDelayAluImm(Imm, OS);
+    break;
+  case AMDGPU::SI_VIRTUAL_SPILL_MARKER:
+    if (OpIdx == 0) {
+      // Print register index as virtual register name: %0, %1, etc.
+      OS << '%' << Imm;
+    } else {
+      // Print lane mask in 16-digit hex format
+      OS << PrintLaneMask(LaneBitmask(static_cast<uint64_t>(Imm)));
+    }
     break;
   default:
     MIRFormatter::printImm(OS, MI, OpIdx, Imm);
@@ -41,6 +51,24 @@ bool AMDGPUMIRFormatter::parseImmMnemonic(const unsigned OpCode,
   switch (OpCode) {
   case AMDGPU::S_DELAY_ALU:
     return parseSDelayAluImmMnemonic(OpIdx, Imm, Src, ErrorCallback);
+  case AMDGPU::SI_VIRTUAL_SPILL_MARKER:
+    if (OpIdx == 0) {
+      // Parse %<number> format
+      if (!Src.consume_front("%"))
+        return ErrorCallback(Src.begin(), "Expected '%' for register index");
+      uint64_t Idx;
+      if (Src.consumeInteger(10, Idx))
+        return ErrorCallback(Src.begin(), "Expected register index number");
+      Imm = static_cast<int64_t>(Idx);
+      return false;
+    } else {
+      // Parse 16-digit hex lane mask
+      uint64_t Mask;
+      if (Src.consumeInteger(16, Mask))
+        return ErrorCallback(Src.begin(), "Expected 16-digit hex lane mask");
+      Imm = static_cast<int64_t>(Mask);
+      return false;
+    }
   default:
     break;
   }
