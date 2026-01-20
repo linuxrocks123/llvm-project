@@ -37,6 +37,11 @@ static cl::opt<bool> EnableVirtualSpillMarkers(
     cl::Hidden, cl::init(false));
 
 // ============================================================================
+static cl::opt<bool> DisableReloadOptimizer(
+    "amdgpu-ssa-spill-no-reload-opt",
+    cl::desc("Disable reload optimizer in SSA spiller"),
+    cl::init(false), cl::Hidden);
+
 // Helper function to identify spill instructions
 // ============================================================================
 
@@ -233,8 +238,7 @@ void AMDGPUSSARegisterSpiller::validateFinalRegisterPressure(
 }
 
 bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
-                                               unsigned RPLimit,
-                                               bool IsVGPRPass) {
+                                               unsigned RPLimit) {
   LLVM_DEBUG(dbgs() << "processFunction: " << (IsVGPRPass ? "VGPR" : "SGPR")
                     << " pass, limit=" << RPLimit << "\n");
 
@@ -722,8 +726,6 @@ bool AMDGPUSSARegisterSpiller::spillAndReload(
     LLVM_DEBUG({
       dbgs() << "spillAndReload(): Virtual spill point (KillIdx): " << KillIdx << "\n";
     });
-
-    killIntervalInDominatedRegion(KillIdx, LIS->getInterval(VReg));
     
     // Step 2c: Get stack slot for reload phase
     int FI = assignVirt2StackSlot(VMP);
@@ -741,11 +743,381 @@ bool AMDGPUSSARegisterSpiller::spillAndReload(
   return true;
 }
 
+// ============================================================================
+// Reload Optimizer
+// ============================================================================
+
+unsigned AMDGPUSSARegisterSpiller::getMaxRPForBlock(MachineBasicBlock *MBB) {
+  auto It = MaxRPCache.find(MBB);
+  if (It != MaxRPCache.end())
+    return It->second;
+  
+  // Compute max RP by tracking backwards through the block
+  GCNUpwardRPTracker Tracker(*LIS);
+  Tracker.reset(*MBB);
+  
+  unsigned MaxRP = 0;
+  const GCNSubtarget &ST = MBB->getParent()->getSubtarget<GCNSubtarget>();
+  
+  for (MachineInstr &MI : reverse(*MBB)) {
+    if (MI.isDebugInstr())
+      continue;
+    Tracker.recede(MI);
+    GCNRegPressure Pressure = Tracker.getPressure();
+    unsigned CurRP = IsVGPRPass ? Pressure.getVGPRNum(ST.hasGFX90AInsts())
+                                : Pressure.getSGPRNum();
+    MaxRP = std::max(MaxRP, CurRP);
+  }
+  
+  MaxRPCache[MBB] = MaxRP;
+  return MaxRP;
+}
+
+unsigned AMDGPUSSARegisterSpiller::getMaxRPInBlockUpTo(MachineBasicBlock *MBB,
+                                                        MachineInstr *StopMI) {
+  if (!StopMI || StopMI->getParent() != MBB)
+    return getMaxRPForBlock(MBB);
+  
+  // Compute max RP from block start up to (not including) StopMI
+  GCNUpwardRPTracker Tracker(*LIS);
+  
+  // Start from StopMI and track backwards to block start
+  Tracker.reset(*StopMI);
+  
+  unsigned MaxRP = 0;
+  const GCNSubtarget &ST = MBB->getParent()->getSubtarget<GCNSubtarget>();
+  
+  for (auto It = StopMI->getReverseIterator(); It != MBB->rend(); ++It) {
+    MachineInstr &MI = *It;
+    if (MI.isDebugInstr())
+      continue;
+    Tracker.recede(MI);
+    GCNRegPressure Pressure = Tracker.getPressure();
+    unsigned CurRP = IsVGPRPass ? Pressure.getVGPRNum(ST.hasGFX90AInsts())
+                                : Pressure.getSGPRNum();
+    MaxRP = std::max(MaxRP, CurRP);
+  }
+  
+  return MaxRP;
+}
+
+bool AMDGPUSSARegisterSpiller::canHoistReloadTo(MachineBasicBlock *UseBB,
+                                                 MachineBasicBlock *NCD,
+                                                 MachineInstr *InsertPoint,
+                                                 unsigned RPLimit) {
+  // Spilled register is already counted as live, so MaxRP > RPLimit means
+  // no room for reload (no +1 needed).
+  
+  // Check RP in NCD block up to InsertPoint
+  unsigned NCDRP = InsertPoint ? getMaxRPInBlockUpTo(NCD, InsertPoint)
+                               : getMaxRPForBlock(NCD);
+  if (NCDRP > RPLimit)
+    return false;
+  
+  // BFS from UseBB backwards to NCD, checking all blocks on the path
+  if (UseBB == NCD)
+    return true;
+  
+  SmallPtrSet<MachineBasicBlock *, 8> Visited;
+  SmallVector<MachineBasicBlock *, 8> Worklist;
+  
+  Worklist.push_back(UseBB);
+  Visited.insert(UseBB);
+  Visited.insert(NCD); // Stop at NCD
+  
+  while (!Worklist.empty()) {
+    MachineBasicBlock *Cur = Worklist.pop_back_val();
+    
+    // Check this block's RP (skip NCD, already checked with InsertPoint)
+    if (Cur != NCD) {
+      unsigned CurRP = getMaxRPForBlock(Cur);
+      if (CurRP > RPLimit)
+        return false;
+    }
+    
+    // Add predecessors to worklist
+    for (MachineBasicBlock *Pred : Cur->predecessors()) {
+      if (Visited.insert(Pred).second) {
+        // Only follow paths that lead to NCD (dominated by NCD)
+        if (DT->dominates(NCD, Pred) || Pred == NCD)
+          Worklist.push_back(Pred);
+      }
+    }
+  }
+  
+  return true;
+}
+
+SmallVector<std::pair<MachineBasicBlock *, MachineInstr *>, 4>
+AMDGPUSSARegisterSpiller::optimizeReloadPlacing(
+    const SmallVectorImpl<MachineInstr *> &GroupHeads, unsigned RPLimit) {
+  
+  using ResultPair = std::pair<MachineBasicBlock *, MachineInstr *>;
+  SmallVector<ResultPair, 4> Result;
+  
+  if (GroupHeads.empty())
+    return Result;
+  
+  // Single group - no optimization possible
+  if (GroupHeads.size() == 1) {
+    MachineInstr *Head = GroupHeads[0];
+    Result.push_back({Head->getParent(), Head});
+    return Result;
+  }
+  
+  LLVM_DEBUG(dbgs() << "\n=== Reload Optimizer: " << GroupHeads.size() 
+                    << " group heads ===\n");
+  
+  unsigned N = GroupHeads.size();
+  
+  // Build NCD matrix and InsertPoint matrix
+  // NCDMatrix[i][j] = NCD of GroupHeads[i] and GroupHeads[j]
+  // InsertPointMatrix[i][j] = reload insertion point in NCD (earliest of the two if both in NCD)
+  SmallVector<SmallVector<MachineBasicBlock *, 4>, 4> NCDMatrix(N);
+  SmallVector<SmallVector<MachineInstr *, 4>, 4> InsertPointMatrix(N);
+  
+  for (unsigned i = 0; i < N; ++i) {
+    NCDMatrix[i].resize(N, nullptr);
+    InsertPointMatrix[i].resize(N, nullptr);
+  }
+  
+  // Fill matrices
+  for (unsigned i = 0; i < N; ++i) {
+    MachineBasicBlock *BBi = GroupHeads[i]->getParent();
+    NCDMatrix[i][i] = BBi;
+    InsertPointMatrix[i][i] = GroupHeads[i];
+    
+    for (unsigned j = i + 1; j < N; ++j) {
+      MachineBasicBlock *BBj = GroupHeads[j]->getParent();
+      MachineBasicBlock *NCD = DT->findNearestCommonDominator(BBi, BBj);
+      
+      if (!NCD) {
+        // No common dominator - can't merge
+        NCDMatrix[i][j] = NCDMatrix[j][i] = nullptr;
+        continue;
+      }
+      
+      NCDMatrix[i][j] = NCDMatrix[j][i] = NCD;
+      
+      // Determine InsertPoint: earliest instruction if both uses are in NCD
+      MachineInstr *InsertPoint = nullptr;
+      if (NCD == BBi && NCD == BBj) {
+        // Both in same block - use the earlier one
+        for (MachineInstr &MI : *NCD) {
+          if (&MI == GroupHeads[i] || &MI == GroupHeads[j]) {
+            InsertPoint = &MI;
+            break;
+          }
+        }
+      } else if (NCD == BBi) {
+        InsertPoint = GroupHeads[i];
+      } else if (NCD == BBj) {
+        InsertPoint = GroupHeads[j];
+      }
+      // else: NCD is a dominator of both, InsertPoint = nullptr (end of block)
+      
+      InsertPointMatrix[i][j] = InsertPointMatrix[j][i] = InsertPoint;
+    }
+  }
+  
+  // Build adjacency: edge[i][j] = true if we can hoist both i and j to their NCD
+  SmallVector<SmallVector<bool, 4>, 4> CanMerge(N);
+  SmallVector<unsigned, 4> EdgeCount(N, 0);
+  
+  for (unsigned i = 0; i < N; ++i)
+    CanMerge[i].resize(N, false);
+  
+  for (unsigned i = 0; i < N; ++i) {
+    for (unsigned j = i + 1; j < N; ++j) {
+      MachineBasicBlock *NCD = NCDMatrix[i][j];
+      if (!NCD)
+        continue;
+      
+      MachineInstr *InsertPoint = InsertPointMatrix[i][j];
+      MachineBasicBlock *BBi = GroupHeads[i]->getParent();
+      MachineBasicBlock *BBj = GroupHeads[j]->getParent();
+      
+      bool CanHoistI = canHoistReloadTo(BBi, NCD, InsertPoint, RPLimit);
+      bool CanHoistJ = canHoistReloadTo(BBj, NCD, InsertPoint, RPLimit);
+      
+      if (CanHoistI && CanHoistJ) {
+        CanMerge[i][j] = CanMerge[j][i] = true;
+        EdgeCount[i]++;
+        EdgeCount[j]++;
+      }
+    }
+  }
+  
+  // Greedy clique extraction
+  SmallVector<int, 4> Assignment(N, -1); // -1 = unassigned
+  int NextCliqueID = 0;
+  
+  while (true) {
+    // Find unassigned node with most edges (heuristic for larger cliques)
+    int BestSeed = -1;
+    unsigned BestEdges = 0;
+    for (unsigned i = 0; i < N; ++i) {
+      if (Assignment[i] == -1 && EdgeCount[i] >= BestEdges) {
+        BestSeed = i;
+        BestEdges = EdgeCount[i];
+      }
+    }
+    
+    if (BestSeed == -1)
+      break; // All assigned
+    
+    // Start clique with this seed
+    SmallVector<unsigned, 4> Clique;
+    Clique.push_back(BestSeed);
+    Assignment[BestSeed] = NextCliqueID;
+    
+    // Try to extend clique with other unassigned nodes
+    for (unsigned i = 0; i < N; ++i) {
+      if (Assignment[i] != -1)
+        continue;
+      
+      // Check if i can join the clique (connected to all current members)
+      bool CanJoin = true;
+      for (unsigned Member : Clique) {
+        if (!CanMerge[i][Member]) {
+          CanJoin = false;
+          break;
+        }
+      }
+      
+      if (CanJoin) {
+        Clique.push_back(i);
+        Assignment[i] = NextCliqueID;
+      }
+    }
+    
+    // Compute NCD for this clique
+    MachineBasicBlock *CliqueNCD = GroupHeads[Clique[0]]->getParent();
+    MachineInstr *CliqueInsertPoint = GroupHeads[Clique[0]];
+    
+    for (unsigned i = 1; i < Clique.size(); ++i) {
+      MachineBasicBlock *BB = GroupHeads[Clique[i]]->getParent();
+      CliqueNCD = DT->findNearestCommonDominator(CliqueNCD, BB);
+      
+      // Update InsertPoint if use is in NCD
+      if (CliqueNCD == BB) {
+        MachineInstr *Head = GroupHeads[Clique[i]];
+        if (!CliqueInsertPoint || CliqueInsertPoint->getParent() != CliqueNCD) {
+          CliqueInsertPoint = Head;
+        } else {
+          // Both in same block - find earlier
+          for (MachineInstr &MI : *CliqueNCD) {
+            if (&MI == Head || &MI == CliqueInsertPoint) {
+              CliqueInsertPoint = &MI;
+              break;
+            }
+          }
+        }
+      } else if (CliqueInsertPoint && CliqueInsertPoint->getParent() != CliqueNCD) {
+        // NCD changed and InsertPoint is no longer in NCD
+        CliqueInsertPoint = nullptr;
+      }
+    }
+    
+    // Add result: one reload for this clique
+    if (CliqueInsertPoint && CliqueInsertPoint->getParent() == CliqueNCD) {
+      Result.push_back({CliqueNCD, CliqueInsertPoint});
+    } else {
+      // Insert at end of NCD (before terminator)
+      Result.push_back({CliqueNCD, nullptr});
+    }
+    
+    LLVM_DEBUG({
+      dbgs() << "  Clique " << NextCliqueID << ": {";
+      for (unsigned i = 0; i < Clique.size(); ++i) {
+        if (i > 0) dbgs() << ", ";
+        dbgs() << Clique[i];
+      }
+      dbgs() << "} -> " << printMBBReference(*CliqueNCD);
+      if (CliqueInsertPoint)
+        dbgs() << " before " << *CliqueInsertPoint;
+      dbgs() << "\n";
+    });
+    
+    NextCliqueID++;
+  }
+  
+  LLVM_DEBUG(dbgs() << "  Reduced " << N << " groups to " << Result.size() 
+                    << " reload points\n");
+  
+  return Result;
+}
+
+void AMDGPUSSARegisterSpiller::fixPathologicalPHIs(VRegMaskPair SpilledVMP,
+                                                    int FrameIndex,
+                                                    MachineInstr *KillMI) {
+  Register SpilledReg = SpilledVMP.getVReg();
+  
+  // Find PHI instructions that still use the spilled register
+  // AND are dominated by the spill point
+  SmallVector<MachineInstr *, 4> PathologicalPHIs;
+  
+  for (MachineOperand &MO : MRI->use_operands(SpilledReg)) {
+    MachineInstr *UseMI = MO.getParent();
+    if (!UseMI->isPHI())
+      continue;
+    
+    // Only PHIs dominated by spill point are pathological
+    // PHIs NOT dominated have a clean path (bypass) and should keep original value
+    if (!DT->dominates(KillMI, UseMI))
+      continue;
+    
+    // Check if this PHI operand overlaps with spilled lanes
+    VRegMaskPair UseVMP(MO, TRI, MRI);
+    if (!UseVMP.overlaps(SpilledVMP))
+      continue;
+    
+    PathologicalPHIs.push_back(UseMI);
+  }
+  
+  if (PathologicalPHIs.empty())
+    return;
+  
+  LLVM_DEBUG(dbgs() << "\n=== Fixing " << PathologicalPHIs.size() 
+                    << " pathological PHI(s) ===\n");
+  
+  for (MachineInstr *PHI : PathologicalPHIs) {
+    // Get PHI destination - we'll keep this register to avoid rewriting uses
+    Register PHIDest = PHI->getOperand(0).getReg();
+    MachineBasicBlock *PHIBB = PHI->getParent();
+    
+    LLVM_DEBUG(dbgs() << "  Replacing PHI: " << *PHI);
+    
+    // Get the register class from the PHI destination
+    const TargetRegisterClass *RC = MRI->getRegClass(PHIDest);
+    
+    // Insert reload after all PHIs (can't insert non-PHI before PHI)
+    MachineBasicBlock::iterator InsertPos = PHIBB->getFirstNonPHI();
+    TII->loadRegFromStackSlot(*PHIBB, InsertPos, PHIDest, FrameIndex, RC,
+                              TRI, Register());
+    MachineInstr *ReloadMI = &*std::prev(InsertPos);
+    
+    // Add to slot indexes (LiveIntervals recomputed at end via shrinkToUses)
+    Indexes->insertMachineInstrInMaps(*ReloadMI);
+    
+    // Remove the PHI
+    Indexes->removeMachineInstrFromMaps(*PHI);
+    PHI->eraseFromParent();
+    
+    ++NumReloads;
+    
+    LLVM_DEBUG(dbgs() << "    Inserted reload: " << *ReloadMI);
+  }
+}
+
 void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
     VRegMaskPair SpilledVMP, SlotIndex KillIdx, int FrameIndex) {
   
   Register SpilledReg = SpilledVMP.getVReg();
   LaneBitmask SpilledMask = SpilledVMP.getLaneMask();
+  
+  // Clear MaxRPCache for each spill analysis
+  MaxRPCache.clear();
   
   // Get the instruction at KillIdx for dominance/reachability checks
   MachineInstr *KillMI = Indexes->getInstructionFromIndex(KillIdx);
@@ -850,46 +1222,81 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
     }
   }
   
-  // Count and report groups
-  unsigned NumGroups = 0;
+  // Collect group heads
+  SmallVector<MachineInstr *, 4> GroupHeads;
   for (const auto &G : Groups) {
     if (!G.isDeleted())
-      ++NumGroups;
+      GroupHeads.push_back(G.getHead());
   }
-  LLVM_DEBUG(dbgs() << "Created " << NumGroups << " dominance group(s)\n");
+  LLVM_DEBUG(dbgs() << "Created " << GroupHeads.size() << " dominance group(s)\n");
   
-  // Step 3 & 4: Emit reload at each group head and repair SSA
-  // For each group, we emit ONE reload at the head. The MachineLaneSSAUpdater
-  // inside reloadBefore() will automatically:
+  // Step 3 & 4: Emit reloads using the reload optimizer
+  // The optimizer finds optimal reload points by hoisting to NCDs when RP permits.
+  // For each reload point, MachineLaneSSAUpdater will automatically:
   // - Create a new VReg
-  // - Rewrite all dominated uses (including all uses in this group)
+  // - Rewrite all dominated uses
   // - Insert PHIs for any non-dominated uses
   // - Handle lane-aware SSA repair
   
-  for (auto &G : Groups) {
-    if (G.isDeleted())
-      continue;
+  unsigned RPLimit = IsVGPRPass ? VGPRLimit : SGPRLimit;
+  
+  if (!DisableReloadOptimizer && GroupHeads.size() > 1) {
+    // Use reload optimizer to find optimal reload points
+    auto ReloadPoints = optimizeReloadPlacing(GroupHeads, RPLimit);
+    
+    for (auto &[ReloadBB, InsertBeforeMI] : ReloadPoints) {
+      // Determine insertion iterator
+      MachineBasicBlock::iterator InsertIt;
+      if (InsertBeforeMI) {
+        InsertIt = InsertBeforeMI->getIterator();
+      } else {
+        // Insert at end of block, before terminator
+        InsertIt = ReloadBB->getFirstTerminator();
+      }
       
-    MachineInstr *Head = G.getHead();
-
-    // Check if head was already rewritten by previous group's SSA repair
-    // This can happen when SSA updater inserts PHIs that dominate later groups
-    if (!usesSpilledVMP(Head, SpilledVMP)) {
-      LLVM_DEBUG(dbgs() << "\nSkipping group (head already rewritten): " << *Head);
-      continue;
+      // Check if this reload point's uses were already rewritten
+      // by SSA repair from a previous reload
+      bool HasLiveUse = false;
+      for (MachineInstr *Head : GroupHeads) {
+        if (DT->dominates(&*InsertIt, Head) && usesSpilledVMP(Head, SpilledVMP)) {
+          HasLiveUse = true;
+          break;
+        }
+      }
+      
+      if (!HasLiveUse) {
+        LLVM_DEBUG(dbgs() << "\nSkipping reload point (all uses rewritten): "
+                          << printMBBReference(*ReloadBB) << "\n");
+        continue;
+      }
+      
+      LLVM_DEBUG(dbgs() << "\nEmitting reload in " << printMBBReference(*ReloadBB));
+      if (InsertBeforeMI)
+        LLVM_DEBUG(dbgs() << " before: " << *InsertBeforeMI);
+      else
+        LLVM_DEBUG(dbgs() << " at end of block\n");
+      
+      Register NewVReg = reloadBefore(InsertIt, SpilledVMP);
+      LLVM_DEBUG(dbgs() << "  Reloaded into " << printReg(NewVReg, TRI) << "\n");
     }
+  } else {
+    // Fallback: emit reload at each group head
+    for (MachineInstr *Head : GroupHeads) {
+      // Check if head was already rewritten by previous group's SSA repair
+      if (!usesSpilledVMP(Head, SpilledVMP)) {
+        LLVM_DEBUG(dbgs() << "\nSkipping group (head already rewritten): " << *Head);
+        continue;
+      }
 
-    LLVM_DEBUG(dbgs() << "\nEmitting reload for group head: " << *Head);
-    LLVM_DEBUG(dbgs() << "  Group size: " << G.size() << " use(s)\n");
-    
-    // Emit reload before the group head
-    // reloadBefore() will call MachineLaneSSAUpdater::repairSSAForNewDef()
-    // which handles all SSA repair automatically
-    Register NewVReg = reloadBefore(Head->getIterator(), SpilledVMP);
-    
-    LLVM_DEBUG(dbgs() << "  Reloaded into " << printReg(NewVReg, TRI) << "\n");
-    LLVM_DEBUG(dbgs() << "  All " << G.size() 
-                      << " use(s) in this group will be rewritten by SSA updater\n");
+      LLVM_DEBUG(dbgs() << "\nEmitting reload for group head: " << *Head);
+      
+      Register NewVReg = reloadBefore(Head->getIterator(), SpilledVMP);
+      LLVM_DEBUG(dbgs() << "  Reloaded into " << printReg(NewVReg, TRI) << "\n");
+    }
+    // Fix pathological PHIs that still reference the spilled register
+    // This handles triangle/diamond CFGs where a PHI merges reload with
+    // original
+    fixPathologicalPHIs(SpilledVMP, FrameIndex, KillMI);
   }
   
   // Step 4: Handle reachable but not dominated uses
@@ -954,7 +1361,7 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
   LIS->shrinkToUses(&SpilledLI);
   
   LLVM_DEBUG(dbgs() << "\nemitReloadsAndRepairSSA() complete: emitted " 
-                    << NumGroups << " reload(s) for dominated uses, "
+                    << GroupHeads.size() << " reload(s) for dominated uses, "
                     << ReachableUses.size() << " reload(s) for reachable uses\n");
   LLVM_DEBUG(dbgs() << "=================================\n\n");
 }
@@ -1554,32 +1961,6 @@ void AMDGPUSSARegisterSpiller::cutFromLiveRange(LiveRange &LR, SlotIndex CutStar
   }
 }
 
-void AMDGPUSSARegisterSpiller::killIntervalInDominatedRegion(
-    const SlotIndex &KillIdx, LiveInterval &LI) {
-  MachineInstr *KillMI = Indexes->getInstructionFromIndex(KillIdx);
-  if (KillMI) {
-    MachineBasicBlock *KillBB = KillMI->getParent();
-    SmallVector<MachineBasicBlock *, 4> DomBBs;
-    collectDominatedBlocks(*KillBB, DomBBs);
-    SlotIndex SpillCutStart = KillIdx.getRegSlot();
-    SlotIndex SpillBBEnd = LIS->getMBBEndIdx(KillBB);
-    cutFromLiveRange(LI, SpillCutStart, SpillBBEnd);
-    for (auto &SR : LI.subranges())
-      cutFromLiveRange(SR, SpillCutStart, SpillBBEnd);
-    for (MachineBasicBlock *MBB : DomBBs) {
-      if (MBB == KillBB)
-        continue;
-
-      SlotIndex B = LIS->getMBBStartIdx(MBB);
-      SlotIndex E = LIS->getMBBEndIdx(MBB);
-
-      cutFromLiveRange(LI, B, E);
-      for (auto &SR : LI.subranges())
-        cutFromLiveRange(SR, B, E);
-    }
-  }
-}
-
 MachineInstr* AMDGPUSSARegisterSpiller::splitBlockBeforeReload(
     MachineInstr *KillMI, MachineInstr *ReloadMI, VRegMaskPair SpilledVMP) {
   
@@ -1804,11 +2185,13 @@ bool AMDGPUSSARegisterSpiller::runOnMachineFunction(MachineFunction &MF) {
 
   // Pass 1: SGPR Spilling
   LLVM_DEBUG(dbgs() << "\n=== Pass 1: Processing SGPRs ===\n");
-  bool ChangedSGPR = processFunction(MF, SGPRLimit, /*IsVGPRPass=*/false);
+  IsVGPRPass = false;
+  bool ChangedSGPR = processFunction(MF, SGPRLimit);
 
   // Pass 2: VGPR Spilling
   LLVM_DEBUG(dbgs() << "\n=== Pass 2: Processing VGPRs ===\n");
-  bool ChangedVGPR = processFunction(MF, VGPRLimit, /*IsVGPRPass=*/true);
+  IsVGPRPass = true;
+  bool ChangedVGPR = processFunction(MF, VGPRLimit);
 
   LLVM_DEBUG(dbgs() << "\nAMDGPUSSARegisterSpiller: Completed processing "
                     << MF.getName() << "\n");

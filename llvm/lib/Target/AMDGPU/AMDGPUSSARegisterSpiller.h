@@ -97,6 +97,12 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   unsigned VGPRLimit = 0;
   unsigned SGPRLimit = 0;
 
+  // Current pass type for reload optimizer RP calculation
+  bool IsVGPRPass = false;
+  
+  // Reload optimizer: cached max RP per block (cleared per spill analysis)
+  DenseMap<MachineBasicBlock *, unsigned> MaxRPCache;
+
   // TODO: Add tracking for spilled/reloaded registers if needed for
   // verification
 
@@ -125,7 +131,8 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
 
   /// Processes the entire function for one register class (SGPR or VGPR).
   /// This is called twice: first for SGPRs, then for VGPRs.
-  bool processFunction(MachineFunction &MF, unsigned RPLimit, bool IsVGPRPass);
+  /// Uses IsVGPRPass class member (set before calling).
+  bool processFunction(MachineFunction &MF, unsigned RPLimit);
 
   /// Validates that final register pressure is within limits after all spilling.
   /// This is a temporary validation check until we properly handle clean path reloads.
@@ -265,7 +272,33 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
 
   void cutFromLiveRange(LiveRange &LR, SlotIndex CutStart, SlotIndex CutEnd);
 
-  void killIntervalInDominatedRegion(const SlotIndex &KillIdx, LiveInterval &LI);
+  // ============================================================================
+  // Reload Optimizer
+  // ============================================================================
+  
+  /// Computes and caches maximum register pressure within a basic block.
+  unsigned getMaxRPForBlock(MachineBasicBlock *MBB);
+  
+  /// Computes max RP in block from start up to (not including) StopMI.
+  unsigned getMaxRPInBlockUpTo(MachineBasicBlock *MBB, MachineInstr *StopMI);
+  
+  /// Checks if reload can be hoisted from UseBB to NCD.
+  /// InsertPoint is the reload insertion point in NCD (nullptr if no use in NCD).
+  bool canHoistReloadTo(MachineBasicBlock *UseBB, MachineBasicBlock *NCD,
+                        MachineInstr *InsertPoint, unsigned RPLimit);
+  
+  /// Optimize reload placement for multiple dom-group heads.
+  /// Uses iterative greedy clique-based NCD algorithm with RP checking.
+  /// Returns list of (ReloadBB, InsertBeforeMI) pairs.
+  SmallVector<std::pair<MachineBasicBlock *, MachineInstr *>, 4>
+  optimizeReloadPlacing(const SmallVectorImpl<MachineInstr *> &GroupHeads,
+                        unsigned RPLimit);
+  
+  /// Fix pathological PHIs that still use the spilled register.
+  /// In triangle/diamond CFGs, a PHI may merge a reloaded value with the
+  /// original spilled value. Replace such PHIs with reloads.
+  void fixPathologicalPHIs(VRegMaskPair SpilledVMP, int FrameIndex,
+                           MachineInstr *KillMI);
 
       /// Splits the join block at the reload point, placing reload on
       /// spill-path edge only. This ensures the reload executes only when
