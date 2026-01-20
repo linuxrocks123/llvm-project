@@ -27,8 +27,14 @@ void AMDGPUMIRFormatter::printImm(raw_ostream &OS, const MachineInstr &MI,
     break;
   case AMDGPU::SI_VIRTUAL_SPILL_MARKER:
     if (OpIdx == 0) {
-      // Print register index as virtual register name: %0, %1, etc.
-      OS << '%' << Imm;
+      // Print register with name if available
+      Register Reg = Register::index2VirtReg(static_cast<unsigned>(Imm));
+      const MachineRegisterInfo &MRI = MI.getMF()->getRegInfo();
+      StringRef Name = MRI.getVRegName(Reg);
+      if (!Name.empty())
+        OS << '%' << Name;
+      else
+        OS << '%' << Imm;
     } else {
       // Print lane mask in 16-digit hex format
       OS << PrintLaneMask(LaneBitmask(static_cast<uint64_t>(Imm)));

@@ -57,7 +57,7 @@ body:             |
     %sum2:vgpr_32 = V_ADD_U32_e32 %sum, %a2, implicit $exec
     %sum3:vgpr_32 = V_ADD_U32_e32 %sum2, %a3, implicit $exec
     
-    ; CHECK: SI_VIRTUAL_SPILL_MARKER
+    ; CHECK: SI_VIRTUAL_SPILL_MARKER %x
     
     ; Branch to left or right
     %cond:sgpr_32 = S_MOV_B32 0

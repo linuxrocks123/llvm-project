@@ -1,4 +1,4 @@
-# RUN: llc -mtriple=amdgcn-amd-amdhsa -mcpu=gfx1200 -amdgpu-ssa-spill-no-reload-opt -verify-machineinstrs -run-pass=amdgpu-ssa-register-spiller -o - %s | FileCheck %s
+# RUN: llc -mtriple=amdgcn-amd-amdhsa -mcpu=gfx1200 -amdgpu-ssa-spill-no-reload-opt -amdgpu-ssa-spill-markers -verify-machineinstrs -run-pass=amdgpu-ssa-register-spiller -o - %s | FileCheck %s
 #
 # Test: Triangle CFG with bypass path (no use on some edges)
 #
@@ -28,6 +28,8 @@
 # CHECK-LABEL: name: triangle_phi
 # CHECK: bb.0.entry:
 # CHECK: SI_SPILL_V32_SAVE
+# CHECK: bb.1.high_rp:
+# CHECK: SI_VIRTUAL_SPILL_MARKER %x
 # CHECK: bb.2.left:
 # CHECK: SI_SPILL_V32_RESTORE
 # CHECK: bb.3.middle:

@@ -1,4 +1,4 @@
-# RUN: llc -mtriple=amdgcn-amd-amdhsa -mcpu=gfx1200 -amdgpu-ssa-spill-no-reload-opt -verify-machineinstrs -run-pass=amdgpu-ssa-register-spiller -o - %s | FileCheck %s
+# RUN: llc -mtriple=amdgcn-amd-amdhsa -mcpu=gfx1200 -amdgpu-ssa-spill-no-reload-opt -amdgpu-ssa-spill-markers -verify-machineinstrs -run-pass=amdgpu-ssa-register-spiller -o - %s | FileCheck %s
 #
 # Test: Simple Diamond with 3 uses + bypass path (no use)
 #
@@ -29,6 +29,8 @@
 # CHECK-LABEL: name: diamond_phi_merge
 # CHECK: bb.0.entry:
 # CHECK: SI_SPILL_V32_SAVE
+# CHECK: bb.1.high_rp:
+# CHECK: SI_VIRTUAL_SPILL_MARKER %x
 # CHECK: bb.2.left:
 # CHECK: [[LEFT:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE
 # CHECK: bb.3.right:

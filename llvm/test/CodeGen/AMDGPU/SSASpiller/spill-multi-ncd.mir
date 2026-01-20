@@ -57,6 +57,9 @@ machineFunctionInfo:
   stackPtrOffsetReg: '$sgpr32'
 body:             |
   ; CHECK-LABEL: name: multi_ncd_test
+  ; CHECK: bb.0.entry:
+  ; CHECK: SI_SPILL_V32_SAVE
+  ; CHECK: SI_VIRTUAL_SPILL_MARKER %x
   
   bb.0.entry:
     successors: %bb.1(0x40000000), %bb.3(0x40000000)
