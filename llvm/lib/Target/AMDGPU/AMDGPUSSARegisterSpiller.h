@@ -329,23 +329,6 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   adjustReloadForLoop(MachineBasicBlock *ReloadBB, MachineInstr *InsertBeforeMI,
                       MachineBasicBlock *KillBB);
 
-      /// Splits the join block at the reload point, placing reload on
-      /// spill-path edge only. This ensures the reload executes only when
-      /// arriving from the spill path, not the clean path.
-      /// MachineLaneSSAUpdater will automatically insert PHI at the merge
-      /// point. JoinBB is computed directly from CFG structure (no IDF needed).
-      /// Returns the reload instruction in the split block (same ReloadMI
-      /// pointer, but in new block).
-      MachineInstr *
-      splitBlockBeforeReload(MachineInstr *KillMI, MachineInstr *ReloadMI,
-                             VRegMaskPair SpilledVMP);
-
-  /// Handles reachable but not dominated uses via split-before-use.
-  /// With "store at definition", spills are correct (all lanes stored), so we only
-  /// need to handle reload placement. No WWM needed since we store the same mask as defined.
-  void handleReachableUse(MachineInstr *KillMI, MachineInstr *ReloadMI,
-                          VRegMaskPair SpilledVMP);
-
 public:
   static char ID;
 
