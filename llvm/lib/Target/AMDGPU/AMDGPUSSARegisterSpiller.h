@@ -300,6 +300,35 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   void fixPathologicalPHIs(VRegMaskPair SpilledVMP, int FrameIndex,
                            MachineInstr *KillMI);
 
+  // ============================================================================
+  // Loop-Aware Spilling Helpers
+  // ============================================================================
+  
+  /// Returns true if VMP's definition is inside any loop.
+  bool hasDefInLoop(VRegMaskPair VMP) const;
+  
+  /// Returns true if VMP has any use inside a loop.
+  bool hasUseInLoop(VRegMaskPair VMP) const;
+  
+  /// Find the loop exit block that dominates SpillBB.
+  /// For loops with multiple exits, returns the one dominating SpillBB.
+  /// Returns nullptr if no suitable exit exists.
+  MachineBasicBlock *getLoopExitDominatingSpill(MachineLoop *Loop,
+                                                 MachineBasicBlock *SpillBB) const;
+  
+  /// Get the effective kill block after hoisting out of all enclosing loops.
+  /// If SpillBB is inside loop(s), returns the outermost loop's preheader.
+  /// Otherwise returns SpillBB unchanged.
+  MachineBasicBlock *getEffectiveKillBB(MachineBasicBlock *SpillBB) const;
+  
+  /// Adjust reload placement for loop-aware spilling.
+  /// If ReloadBB is in a loop but KillBB is outside, returns the preheader
+  /// (only if it doesn't cause RP to exceed limit in the loop header).
+  /// Returns the adjusted (ReloadBB, InsertBeforeMI) pair.
+  std::pair<MachineBasicBlock *, MachineInstr *>
+  adjustReloadForLoop(MachineBasicBlock *ReloadBB, MachineInstr *InsertBeforeMI,
+                      MachineBasicBlock *KillBB);
+
       /// Splits the join block at the reload point, placing reload on
       /// spill-path edge only. This ensures the reload executes only when
       /// arriving from the spill path, not the clean path.

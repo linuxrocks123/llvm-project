@@ -534,6 +534,61 @@ VRegMaskPairSet AMDGPUSSARegisterSpiller::getVMPsToSpill(
   // Step 2: Sort Active set by next-use distance (longest last)
   sortRegSetByNextUse(MBB, I, Active);
 
+  // Step 2.5: Loop-aware candidate filtering
+  // If spill point is inside a loop, we hoist it to the outermost preheader.
+  // Only candidates whose def dominates the effective kill point are valid.
+  MachineBasicBlock *EffectiveKillBB = getEffectiveKillBB(&MBB);
+  
+  if (EffectiveKillBB != &MBB) {
+    // Spill point was hoisted - filter candidates
+    LLVM_DEBUG(dbgs() << "getVMPsToSpill(): Spill in loop, effective kill at "
+                      << printMBBReference(*EffectiveKillBB) << "\n");
+    
+    // Rebuild Active with only valid candidates (preserving NUD order)
+    SmallVector<VRegMaskPair> ValidCandidates;
+    for (const auto &VMP : Active) {
+      MachineInstr *DefMI = MRI->getVRegDef(VMP.getVReg());
+      if (!DefMI)
+        continue;
+      
+      MachineBasicBlock *DefBB = DefMI->getParent();
+      // Def must dominate the effective (hoisted) kill point
+      if (DT->dominates(DefBB, EffectiveKillBB)) {
+        ValidCandidates.push_back(VMP);
+        LLVM_DEBUG({
+          StringRef Name = MRI->getVRegName(VMP.getVReg());
+          dbgs() << "  Valid candidate: ";
+          if (!Name.empty())
+            dbgs() << "%" << Name;
+          else
+            dbgs() << printReg(VMP.getVReg(), TRI);
+          dbgs() << " (def dominates effective kill)\n";
+        });
+      } else {
+        LLVM_DEBUG({
+          StringRef Name = MRI->getVRegName(VMP.getVReg());
+          dbgs() << "  Filtered out: ";
+          if (!Name.empty())
+            dbgs() << "%" << Name;
+          else
+            dbgs() << printReg(VMP.getVReg(), TRI);
+          dbgs() << " (def in loop, doesn't dominate effective kill)\n";
+        });
+      }
+    }
+    
+    if (ValidCandidates.empty()) {
+      LLVM_DEBUG(dbgs() << "getVMPsToSpill(): No valid candidates after loop filter!\n");
+      // TODO: Fallback - pick best invalid candidate and use loop exit sinking
+      return ToSpill;
+    }
+    
+    // Rebuild Active from valid candidates (preserves NUD order)
+    Active.clear();
+    for (const auto &VMP : ValidCandidates)
+      Active.insert(VMP);
+  }
+
   // Step 3: Greedily select registers to spill from the back
   unsigned RemainingToSpill = SizeToSpill;
 
@@ -673,6 +728,8 @@ bool AMDGPUSSARegisterSpiller::spillAndReload(
     return false;
   }
 
+  // TODO: this message is not correct. spillAndReload will spill as much as CurRP - RPLimit,
+  // but here we print a total number of VMPs available for spill.
   LLVM_DEBUG(dbgs() << "spillAndReload(): Will spill " << ToSpill.size() 
                     << " VMP(s)\n");
 
@@ -703,23 +760,35 @@ bool AMDGPUSSARegisterSpiller::spillAndReload(
     // The LiveInterval will be shrunk later by shrinkToUses() after all reloads are placed.
     MachineBasicBlock::iterator SpillPos = I.getReverse();
     
+    // Get the effective kill block (hoisted out of loops if needed)
+    MachineBasicBlock *EffectiveKillBB = getEffectiveKillBB(&MBB);
+    
     SlotIndex KillIdx;
-    if (SpillPos == MBB.end()) {
+    MachineBasicBlock::iterator MarkerPos;
+    MachineBasicBlock *MarkerBB = EffectiveKillBB;
+    
+    if (EffectiveKillBB != &MBB) {
+      // Spill hoisted to preheader - kill at preheader end
+      KillIdx = Indexes->getMBBEndIdx(EffectiveKillBB).getPrevSlot();
+      MarkerPos = EffectiveKillBB->getFirstTerminator();
+    } else if (SpillPos == MBB.end()) {
       KillIdx = Indexes->getMBBEndIdx(&MBB).getPrevSlot();
+      MarkerPos = MBB.end();
     } else {
       KillIdx = Indexes->getInstructionIndex(*SpillPos).getRegSlot();
+      MarkerPos = SpillPos;
     }
-
+    
+    // Virtual spill marker at effective kill point
     if (EnableVirtualSpillMarkers) {
-      if (I->isPHI()) {
-        LLVM_DEBUG(
-            dbgs() << "Virtual spill marker for PHI goes to predecessors\n");
+      if (I->isPHI() && EffectiveKillBB == &MBB) {
+        // PHI case only applies when not hoisted
+        LLVM_DEBUG(dbgs() << "Virtual spill marker for PHI goes to predecessors\n");
         for (auto *Pred : MBB.predecessors()) {
-          SpillPos = Pred->getFirstTerminator();
-          insertVirtualSpillMarker(*Pred, SpillPos, VMP);
+          insertVirtualSpillMarker(*Pred, Pred->getFirstTerminator(), VMP);
         }
       } else {
-        insertVirtualSpillMarker(MBB, SpillPos, VMP);
+        insertVirtualSpillMarker(*MarkerBB, MarkerPos, VMP);
       }
     }
     
@@ -1110,6 +1179,104 @@ void AMDGPUSSARegisterSpiller::fixPathologicalPHIs(VRegMaskPair SpilledVMP,
   }
 }
 
+// ============================================================================
+// Loop-Aware Spilling Helpers
+// ============================================================================
+
+bool AMDGPUSSARegisterSpiller::hasDefInLoop(VRegMaskPair VMP) const {
+  MachineInstr *DefMI = MRI->getVRegDef(VMP.getVReg());
+  if (!DefMI)
+    return false;
+  return MLI->getLoopFor(DefMI->getParent()) != nullptr;
+}
+
+bool AMDGPUSSARegisterSpiller::hasUseInLoop(VRegMaskPair VMP) const {
+  Register Reg = VMP.getVReg();
+  for (MachineInstr &UseMI : MRI->use_nodbg_instructions(Reg)) {
+    // Skip spill instructions
+    if (isSpillInstr(&UseMI))
+      continue;
+    
+    // Check if use operand overlaps with VMP
+    MachineOperand *UseOp = UseMI.findRegisterUseOperand(Reg, TRI, false);
+    if (!UseOp)
+      continue;
+    VRegMaskPair UseVMP(*UseOp, TRI, MRI);
+    if (!UseVMP.overlaps(VMP))
+      continue;
+    
+    if (MLI->getLoopFor(UseMI.getParent()))
+      return true;
+  }
+  return false;
+}
+
+MachineBasicBlock *AMDGPUSSARegisterSpiller::getLoopExitDominatingSpill(
+    MachineLoop *Loop, MachineBasicBlock *SpillBB) const {
+  SmallVector<MachineBasicBlock *, 4> ExitBlocks;
+  Loop->getExitBlocks(ExitBlocks);
+  
+  for (MachineBasicBlock *Exit : ExitBlocks) {
+    if (DT->dominates(Exit, SpillBB))
+      return Exit;
+  }
+  return nullptr;
+}
+
+MachineBasicBlock *AMDGPUSSARegisterSpiller::getEffectiveKillBB(
+    MachineBasicBlock *SpillBB) const {
+  // Find outermost loop containing spill point
+  MachineLoop *Loop = MLI->getLoopFor(SpillBB);
+  if (!Loop)
+    return SpillBB;  // Not in any loop
+  
+  // Walk up to outermost loop
+  while (MachineLoop *Parent = Loop->getParentLoop())
+    Loop = Parent;
+  
+  // Get outermost loop's preheader
+  MachineBasicBlock *Preheader = Loop->getLoopPreheader();
+  if (Preheader) {
+    LLVM_DEBUG(dbgs() << "  Hoisting spill point from " << printMBBReference(*SpillBB)
+                      << " to preheader " << printMBBReference(*Preheader) << "\n");
+    return Preheader;
+  }
+  
+  // Irreducible loop - can't hoist
+  LLVM_DEBUG(dbgs() << "  Warning: No preheader for loop containing spill point\n");
+  return SpillBB;
+}
+
+std::pair<MachineBasicBlock *, MachineInstr *>
+AMDGPUSSARegisterSpiller::adjustReloadForLoop(MachineBasicBlock *ReloadBB,
+                                               MachineInstr *InsertBeforeMI,
+                                               MachineBasicBlock *KillBB) {
+  MachineLoop *ReloadLoop = MLI->getLoopFor(ReloadBB);
+  if (ReloadLoop && !ReloadLoop->contains(KillBB)) {
+    // Use in loop, spill outside - consider hoisting reload to preheader
+    MachineBasicBlock *Preheader = ReloadLoop->getLoopPreheader();
+    if (Preheader) {
+      unsigned RPLimit = IsVGPRPass ? VGPRLimit : SGPRLimit;
+      MachineInstr *InsertPoint = nullptr;
+      auto TermIt = Preheader->getFirstTerminator();
+      if (TermIt != Preheader->end())
+        InsertPoint = &*TermIt;
+      bool CanHoist = canHoistReloadTo(ReloadBB, Preheader, InsertPoint, RPLimit);
+
+      if (!CanHoist) {
+        LLVM_DEBUG(dbgs() << "  Cannot hoist reload to preheader: "
+                          << "RP exceeds limit on path, keeping reload inside loop\n");
+        return {ReloadBB, InsertBeforeMI};  // Don't hoist - accept reload in loop
+      }
+      
+      LLVM_DEBUG(dbgs() << "  Hoisting reload from " << printMBBReference(*ReloadBB)
+                        << " to preheader " << printMBBReference(*Preheader) << "\n");
+      return {Preheader, nullptr};  // Insert at end of preheader
+    }
+  }
+  return {ReloadBB, InsertBeforeMI};
+}
+
 void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
     VRegMaskPair SpilledVMP, SlotIndex KillIdx, int FrameIndex) {
   
@@ -1122,6 +1289,7 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
   // Get the instruction at KillIdx for dominance/reachability checks
   MachineInstr *KillMI = Indexes->getInstructionFromIndex(KillIdx);
   assert(KillMI && "KillIdx must correspond to an instruction");
+  MachineBasicBlock *KillBB = KillMI->getParent();
   
   LLVM_DEBUG({
     dbgs() << "\n=== emitReloadsAndRepairSSA() ===\n";
@@ -1238,16 +1406,22 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
   // - Insert PHIs for any non-dominated uses
   // - Handle lane-aware SSA repair
   
+  // TODO: RPLimit should be a class member as IsVGPRPass
   unsigned RPLimit = IsVGPRPass ? VGPRLimit : SGPRLimit;
   
   if (!DisableReloadOptimizer && GroupHeads.size() > 1) {
     // Use reload optimizer to find optimal reload points
     auto ReloadPoints = optimizeReloadPlacing(GroupHeads, RPLimit);
     
-    for (auto &[ReloadBB, InsertBeforeMI] : ReloadPoints) {
+    for (auto &RP : ReloadPoints) {
+      // Adjust for loop-aware placement
+      auto Adjusted = adjustReloadForLoop(RP.first, RP.second, KillBB);
+      MachineBasicBlock *ReloadBB = Adjusted.first;
+      MachineInstr *InsertBeforeMI = Adjusted.second;
+      
       // Determine insertion iterator
       MachineBasicBlock::iterator InsertIt;
-      if (InsertBeforeMI) {
+      if (InsertBeforeMI && InsertBeforeMI->getParent() == ReloadBB) {
         InsertIt = InsertBeforeMI->getIterator();
       } else {
         // Insert at end of block, before terminator
@@ -1290,7 +1464,19 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
 
       LLVM_DEBUG(dbgs() << "\nEmitting reload for group head: " << *Head);
       
-      Register NewVReg = reloadBefore(Head->getIterator(), SpilledVMP);
+      // Adjust for loop-aware placement
+      auto Adjusted = adjustReloadForLoop(Head->getParent(), Head, KillBB);
+      MachineBasicBlock *ReloadBB = Adjusted.first;
+      MachineInstr *InsertBeforeMI = Adjusted.second;
+      
+      MachineBasicBlock::iterator InsertIt;
+      if (InsertBeforeMI && InsertBeforeMI->getParent() == ReloadBB) {
+        InsertIt = InsertBeforeMI->getIterator();
+      } else {
+        InsertIt = ReloadBB->getFirstTerminator();
+      }
+      
+      Register NewVReg = reloadBefore(InsertIt, SpilledVMP);
       LLVM_DEBUG(dbgs() << "  Reloaded into " << printReg(NewVReg, TRI) << "\n");
     }
     // Fix pathological PHIs that still reference the spilled register
