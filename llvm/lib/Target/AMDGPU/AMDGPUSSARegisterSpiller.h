@@ -245,10 +245,13 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   // Divergent Path Optimization Helpers
   // ============================================================================
   
-  /// Returns true if SpilledVMP has any uses on the path from StartBB to EndBB
-  /// StopInstr: if provided, stop checking at this instruction in EndBB (exclusive)
-  bool hasUseOnPath(MachineBasicBlock *StartBB, MachineBasicBlock *EndBB, 
-                    VRegMaskPair SpilledVMP, MachineInstr *StopInstr = nullptr) const;
+  /// Walk BFS from \p StartBB through blocks where \p SpilledReg is live.
+  /// For each block, finds first use of SpilledReg (if any) and calls IsBad.
+  /// Returns true if all live blocks pass IsBad check, false if any fails.
+  bool walkPathsToUses(MachineBasicBlock *StartBB,
+                       Register SpilledReg,
+                       llvm::function_ref<bool(MachineBasicBlock *,
+                                               MachineInstr *)> IsBad) const;
   
   /// Checks if the given block has any use of SpilledVMP.
   /// If StopInstr is provided and is in this block, only checks up to that instruction.
@@ -261,10 +264,10 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   /// overlapping lane mask. Returns false if the use was rewritten by SSA repair.
   bool usesSpilledVMP(const MachineInstr *MI, VRegMaskPair SpilledVMP) const;
   
-  /// Attempts to hoist spill to NCD if no uses exist on either path
-  /// Returns true if hoisting was performed
-  bool tryHoistSpillToNCD(MachineInstr *KillMI, VRegMaskPair SpilledVMP,
-                          const SmallVectorImpl<MachineInstr *> &ReachableUses);
+  /// Attempts to hoist spill to NCD if no unexpected uses exist on paths.
+  /// Returns NCD if hoisting succeeded (and moves virtual spill marker), nullptr otherwise.
+  MachineBasicBlock *tryHoistSpillToNCD(MachineInstr *KillMI, VRegMaskPair SpilledVMP,
+                                         const SmallVectorImpl<MachineInstr *> &ReachableUses);
 
   /// Collects all dominated blocks of the given spill block.
   void collectDominatedBlocks(MachineBasicBlock &SpillMBB,
@@ -282,17 +285,17 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   /// Computes max RP in block from start up to (not including) StopMI.
   unsigned getMaxRPInBlockUpTo(MachineBasicBlock *MBB, MachineInstr *StopMI);
   
-  /// Checks if reload can be hoisted from UseBB to NCD.
+  /// Checks if reload can be hoisted to NCD by walking paths and checking RP.
   /// InsertPoint is the reload insertion point in NCD (nullptr if no use in NCD).
-  bool canHoistReloadTo(MachineBasicBlock *UseBB, MachineBasicBlock *NCD,
-                        MachineInstr *InsertPoint, unsigned RPLimit);
+  bool canHoistReloadTo(MachineBasicBlock *NCD, MachineInstr *InsertPoint,
+                        unsigned RPLimit, Register SpilledReg);
   
   /// Optimize reload placement for multiple dom-group heads.
   /// Uses iterative greedy clique-based NCD algorithm with RP checking.
   /// Returns list of (ReloadBB, InsertBeforeMI) pairs.
   SmallVector<std::pair<MachineBasicBlock *, MachineInstr *>, 4>
   optimizeReloadPlacing(const SmallVectorImpl<MachineInstr *> &GroupHeads,
-                        unsigned RPLimit);
+                        unsigned RPLimit, Register SpilledReg);
   
   /// Fix pathological PHIs that still use the spilled register.
   /// In triangle/diamond CFGs, a PHI may merge a reloaded value with the
@@ -323,11 +326,11 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   
   /// Adjust reload placement for loop-aware spilling.
   /// If ReloadBB is in a loop but KillBB is outside, returns the preheader
-  /// (only if it doesn't cause RP to exceed limit in the loop header).
+  /// (only if it doesn't cause RP to exceed limit on the path).
   /// Returns the adjusted (ReloadBB, InsertBeforeMI) pair.
   std::pair<MachineBasicBlock *, MachineInstr *>
   adjustReloadForLoop(MachineBasicBlock *ReloadBB, MachineInstr *InsertBeforeMI,
-                      MachineBasicBlock *KillBB);
+                      MachineBasicBlock *KillBB, Register SpilledReg);
 
 public:
   static char ID;

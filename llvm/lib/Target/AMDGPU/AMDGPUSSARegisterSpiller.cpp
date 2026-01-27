@@ -870,56 +870,35 @@ unsigned AMDGPUSSARegisterSpiller::getMaxRPInBlockUpTo(MachineBasicBlock *MBB,
   return MaxRP;
 }
 
-bool AMDGPUSSARegisterSpiller::canHoistReloadTo(MachineBasicBlock *UseBB,
-                                                 MachineBasicBlock *NCD,
+bool AMDGPUSSARegisterSpiller::canHoistReloadTo(MachineBasicBlock *NCD,
                                                  MachineInstr *InsertPoint,
-                                                 unsigned RPLimit) {
+                                                 unsigned RPLimit,
+                                                 Register SpilledReg) {
   // Spilled register is already counted as live, so MaxRP > RPLimit means
   // no room for reload (no +1 needed).
   
-  // Check RP in NCD block up to InsertPoint
-  unsigned NCDRP = InsertPoint ? getMaxRPInBlockUpTo(NCD, InsertPoint)
-                               : getMaxRPForBlock(NCD);
-  if (NCDRP > RPLimit)
-    return false;
-  
-  // BFS from UseBB backwards to NCD, checking all blocks on the path
-  if (UseBB == NCD)
-    return true;
-  
-  SmallPtrSet<MachineBasicBlock *, 8> Visited;
-  SmallVector<MachineBasicBlock *, 8> Worklist;
-  
-  Worklist.push_back(UseBB);
-  Visited.insert(UseBB);
-  Visited.insert(NCD); // Stop at NCD
-  
-  while (!Worklist.empty()) {
-    MachineBasicBlock *Cur = Worklist.pop_back_val();
-    
-    // Check this block's RP (skip NCD, already checked with InsertPoint)
-    if (Cur != NCD) {
-      unsigned CurRP = getMaxRPForBlock(Cur);
-      if (CurRP > RPLimit)
-        return false;
-    }
-    
-    // Add predecessors to worklist
-    for (MachineBasicBlock *Pred : Cur->predecessors()) {
-      if (Visited.insert(Pred).second) {
-        // Only follow paths that lead to NCD (dominated by NCD)
-        if (DT->dominates(NCD, Pred) || Pred == NCD)
-          Worklist.push_back(Pred);
-      }
-    }
+  // Check RP in NCD block only if reload is placed inside NCD (InsertPoint set)
+  // If InsertPoint is nullptr, reload goes at NCD end - skip NCD RP check,
+  // walkPathsToUses will check paths from NCD to uses.
+  if (InsertPoint) {
+    unsigned NCDRP = getMaxRPInBlockUpTo(NCD, InsertPoint);
+    if (NCDRP > RPLimit)
+      return false;
   }
   
-  return true;
+  auto IsHighRP = [&](MachineBasicBlock *BB, MachineInstr *UseMI) -> bool {
+    unsigned CurRP = UseMI ? getMaxRPInBlockUpTo(BB, UseMI)
+                           : getMaxRPForBlock(BB);
+    return CurRP > RPLimit;
+  };
+  
+  return walkPathsToUses(NCD, SpilledReg, IsHighRP);
 }
 
 SmallVector<std::pair<MachineBasicBlock *, MachineInstr *>, 4>
 AMDGPUSSARegisterSpiller::optimizeReloadPlacing(
-    const SmallVectorImpl<MachineInstr *> &GroupHeads, unsigned RPLimit) {
+    const SmallVectorImpl<MachineInstr *> &GroupHeads, unsigned RPLimit,
+    Register SpilledReg) {
   
   using ResultPair = std::pair<MachineBasicBlock *, MachineInstr *>;
   SmallVector<ResultPair, 4> Result;
@@ -1003,13 +982,24 @@ AMDGPUSSARegisterSpiller::optimizeReloadPlacing(
         continue;
       
       MachineInstr *InsertPoint = InsertPointMatrix[i][j];
-      MachineBasicBlock *BBi = GroupHeads[i]->getParent();
-      MachineBasicBlock *BBj = GroupHeads[j]->getParent();
       
-      bool CanHoistI = canHoistReloadTo(BBi, NCD, InsertPoint, RPLimit);
-      bool CanHoistJ = canHoistReloadTo(BBj, NCD, InsertPoint, RPLimit);
+      // Check NCD RP only if reload is placed inside NCD (use exists in NCD)
+      // If InsertPoint is nullptr, reload goes at NCD end - skip NCD RP check
+      if (InsertPoint) {
+        unsigned NCDRP = getMaxRPInBlockUpTo(NCD, InsertPoint);
+        if (NCDRP > RPLimit)
+          continue;
+      }
       
-      if (CanHoistI && CanHoistJ) {
+      // Single-walk BFS from NCD, checking RP along the way
+      // Liveness scoping ensures we only check relevant blocks
+      auto IsHighRP = [&](MachineBasicBlock *BB, MachineInstr *UseMI) -> bool {
+        unsigned CurRP = UseMI ? getMaxRPInBlockUpTo(BB, UseMI)
+                               : getMaxRPForBlock(BB);
+        return CurRP > RPLimit;
+      };
+      
+      if (walkPathsToUses(NCD, SpilledReg, IsHighRP)) {
         CanMerge[i][j] = CanMerge[j][i] = true;
         EdgeCount[i]++;
         EdgeCount[j]++;
@@ -1250,7 +1240,8 @@ MachineBasicBlock *AMDGPUSSARegisterSpiller::getEffectiveKillBB(
 std::pair<MachineBasicBlock *, MachineInstr *>
 AMDGPUSSARegisterSpiller::adjustReloadForLoop(MachineBasicBlock *ReloadBB,
                                                MachineInstr *InsertBeforeMI,
-                                               MachineBasicBlock *KillBB) {
+                                               MachineBasicBlock *KillBB,
+                                               Register SpilledReg) {
   MachineLoop *ReloadLoop = MLI->getLoopFor(ReloadBB);
   if (ReloadLoop && !ReloadLoop->contains(KillBB)) {
     // Use in loop, spill outside - consider hoisting reload to preheader
@@ -1261,7 +1252,8 @@ AMDGPUSSARegisterSpiller::adjustReloadForLoop(MachineBasicBlock *ReloadBB,
       auto TermIt = Preheader->getFirstTerminator();
       if (TermIt != Preheader->end())
         InsertPoint = &*TermIt;
-      bool CanHoist = canHoistReloadTo(ReloadBB, Preheader, InsertPoint, RPLimit);
+      
+      bool CanHoist = canHoistReloadTo(Preheader, InsertPoint, RPLimit, SpilledReg);
 
       if (!CanHoist) {
         LLVM_DEBUG(dbgs() << "  Cannot hoist reload to preheader: "
@@ -1358,6 +1350,27 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
                     << " dominated use(s), " << ReachableUses.size()
                     << " reachable use(s)\n");
   
+  // Try to hoist spill point to NCD of kill and reachable uses.
+  // If hoisting succeeds, some reachable uses may become dominated.
+  if (!ReachableUses.empty()) {
+    MachineBasicBlock *NCD = tryHoistSpillToNCD(KillMI, SpilledVMP, ReachableUses);
+    if (NCD) {
+      LLVM_DEBUG(dbgs() << "  Spill hoisted to NCD, reclassifying reachable uses\n");
+
+      // Reclassify: uses dominated by NCD move to DominatedUses
+      SmallVector<MachineInstr *, 4> StillReachable;
+      for (MachineInstr *UseMI : ReachableUses) {
+        MachineBasicBlock *UseBB = UseMI->getParent();
+        if (UseBB != NCD && DT->dominates(NCD, UseBB)) {
+          DominatedUses.push_back(UseMI);
+        } else {
+          StillReachable.push_back(UseMI);
+        }
+      }
+      ReachableUses.swap(StillReachable);
+    }
+  }
+
   // Step 2: Group uses by dominance chains
   // Each use starts in its own group. Then we merge groups where one head
   // dominates another, creating maximal dominance chains. This minimizes
@@ -1411,11 +1424,11 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
   
   if (!DisableReloadOptimizer && GroupHeads.size() > 1) {
     // Use reload optimizer to find optimal reload points
-    auto ReloadPoints = optimizeReloadPlacing(GroupHeads, RPLimit);
+    auto ReloadPoints = optimizeReloadPlacing(GroupHeads, RPLimit, SpilledReg);
     
     for (auto &RP : ReloadPoints) {
       // Adjust for loop-aware placement
-      auto Adjusted = adjustReloadForLoop(RP.first, RP.second, KillBB);
+      auto Adjusted = adjustReloadForLoop(RP.first, RP.second, KillBB, SpilledReg);
       MachineBasicBlock *ReloadBB = Adjusted.first;
       MachineInstr *InsertBeforeMI = Adjusted.second;
       
@@ -1465,7 +1478,7 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
       LLVM_DEBUG(dbgs() << "\nEmitting reload for group head: " << *Head);
       
       // Adjust for loop-aware placement
-      auto Adjusted = adjustReloadForLoop(Head->getParent(), Head, KillBB);
+      auto Adjusted = adjustReloadForLoop(Head->getParent(), Head, KillBB, SpilledReg);
       MachineBasicBlock *ReloadBB = Adjusted.first;
       MachineInstr *InsertBeforeMI = Adjusted.second;
       
@@ -1489,19 +1502,8 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(
   if (!ReachableUses.empty()) {
     LLVM_DEBUG(dbgs() << "\n=== Handling " << ReachableUses.size() 
                       << " reachable (non-dominated) uses ===\n");
-    
-    // Step 4a: Try to hoist spill to NCD if no uses on either path
-    bool Hoisted = tryHoistSpillToNCD(KillMI, SpilledVMP, ReachableUses);
-    
-    if (Hoisted) {
-      LLVM_DEBUG(dbgs() << "  Spill hoisted to NCD, uses now dominated\n");
-      LLVM_DEBUG(dbgs() << "  Reloads will be handled by standard dominated use logic\n");
-      // After hoisting, uses are now dominated, so they'll be handled by
-      // the standard reload placement in the next spilling iteration
-      return;
-    }
-    
-    // Step 4b: Hoisting impossible, handle each use with split-before-use
+
+    // Step 4a: Hoisting impossible, handle each use with split-before-use
     for (MachineInstr *UseMI : ReachableUses) {
       // Check if this use was already rewritten by SSA repair
       // Can happen from: (1) dominated use SSA repair, or (2) previous reachable use SSA repair
@@ -1988,16 +1990,12 @@ bool AMDGPUSSARegisterSpiller::usesSpilledVMP(const MachineInstr *MI,
   return false;
 }
 
-bool AMDGPUSSARegisterSpiller::hasUseOnPath(
-    MachineBasicBlock *StartBB, MachineBasicBlock *EndBB, 
-    VRegMaskPair SpilledVMP, MachineInstr *StopInstr) const {
+bool AMDGPUSSARegisterSpiller::walkPathsToUses(
+    MachineBasicBlock *StartBB,
+    Register SpilledReg,
+    llvm::function_ref<bool(MachineBasicBlock *, MachineInstr *)> IsBad) const {
   
-  // TODO: Implement caching - store results in DenseMap<(BB1, BB2, VMP), bool>
-  // to avoid redundant DFS traversals for the same queries
-  
-  // NOTE: StartBB is EXCLUDED from the search (we start from its successors)
-  // This is used when StartBB is NCD - we don't want to consider uses in NCD itself,
-  // only uses between NCD's exit and EndBB (or before StopInstr in EndBB)
+  const LiveInterval &LI = LIS->getInterval(SpilledReg);
   
   SmallPtrSet<MachineBasicBlock *, 8> Visited;
   SmallVector<MachineBasicBlock *, 8> Worklist(StartBB->successors());
@@ -2006,19 +2004,32 @@ bool AMDGPUSSARegisterSpiller::hasUseOnPath(
     MachineBasicBlock *BB = Worklist.pop_back_val();
     if (!Visited.insert(BB).second)
       continue;
-
-    MachineInstr *BlockStop = (BB == EndBB) ? StopInstr : nullptr;
-    if (blockHasUse(BB, SpilledVMP, BlockStop))
-      return true;
-
-    if (BB == EndBB)
+    
+    // Skip blocks where spilled register is not live
+    SlotIndex BBStart = Indexes->getMBBStartIdx(BB);
+    if (!LI.liveAt(BBStart))
       continue;
-
+    
+    // Find first use of SpilledReg in this block (if any)
+    MachineInstr *FirstUseMI = nullptr;
+    for (MachineInstr &MI : *BB) {
+      if (MI.readsRegister(SpilledReg, TRI)) {
+        FirstUseMI = &MI;
+        break;
+      }
+    }
+    
+    // Check predicate
+    if (IsBad(BB, FirstUseMI))
+      return false;
+    
+    // Continue to successors
     for (MachineBasicBlock *Succ : BB->successors())
       if (!Visited.count(Succ))
         Worklist.push_back(Succ);
   }
-  return false;
+  
+  return true;
 }
 
 bool AMDGPUSSARegisterSpiller::blockHasUse(MachineBasicBlock *BB,
@@ -2049,12 +2060,12 @@ bool AMDGPUSSARegisterSpiller::blockHasUse(MachineBasicBlock *BB,
   return HasUse;
 }
 
-bool AMDGPUSSARegisterSpiller::tryHoistSpillToNCD(
+MachineBasicBlock *AMDGPUSSARegisterSpiller::tryHoistSpillToNCD(
     MachineInstr *KillMI, VRegMaskPair SpilledVMP,
     const SmallVectorImpl<MachineInstr *> &ReachableUses) {
   
   if (ReachableUses.empty())
-    return false;
+    return nullptr;
     
   MachineBasicBlock *KillBB = KillMI->getParent();
   
@@ -2065,30 +2076,30 @@ bool AMDGPUSSARegisterSpiller::tryHoistSpillToNCD(
     NCD = DT->findNearestCommonDominator(NCD, UseBB);
     if (!NCD) {
       LLVM_DEBUG(dbgs() << "  No common dominator found, cannot hoist\n");
-      return false;
+      return nullptr;
     }
   }
   
   LLVM_DEBUG(dbgs() << "  NCD for hoisting: " << printMBBReference(*NCD) << "\n");
   
-  // Check if there are uses on path from NCD to KillMI (exclusive)
-  // This checks blocks between NCD and KillBB, plus KillBB up to (but not including) KillMI
-  if (hasUseOnPath(NCD, KillBB, SpilledVMP, KillMI)) {
+  // Don't hoist into a loop - spill point inside loop would require reload every iteration
+  if (MLI->getLoopFor(NCD)) {
+    LLVM_DEBUG(dbgs() << "  NCD is inside a loop, cannot hoist\n");
+    return nullptr;
+  }
+  
+  auto IsUnexpectedUse = [&](MachineBasicBlock *, MachineInstr *UseMI) -> bool {
+    if (!UseMI)
+      return false;  // No use in this block - OK
+    return !llvm::is_contained(ReachableUses, UseMI);
+  };
+  
+  if (!walkPathsToUses(NCD, SpilledVMP.getVReg(), IsUnexpectedUse)) {
     LLVM_DEBUG(dbgs() << "  Uses exist on NCD→Kill path, cannot hoist\n");
-    return false;
+    return nullptr;
   }
   
-  // Check paths from NCD to each reachable use (the "clean" paths)
-  // Stop at the use instruction itself (don't include it)
-  for (MachineInstr *UseMI : ReachableUses) {
-    MachineBasicBlock *UseBB = UseMI->getParent();
-    if (UseBB != KillBB && hasUseOnPath(NCD, UseBB, SpilledVMP, UseMI)) {
-      LLVM_DEBUG(dbgs() << "  Uses exist on NCD→Use path, cannot hoist\n");
-      return false;
-    }
-  }
-  
-  LLVM_DEBUG(dbgs() << "  No uses on either path, hoisting spill to NCD\n");
+  LLVM_DEBUG(dbgs() << "  No unexpected uses on path, hoisting spill to NCD\n");
   
   // Note: With "store at definition", the actual store is at definition point.
   // Here we're hoisting the "kill point" (where register dies) to NCD.
@@ -2108,9 +2119,24 @@ bool AMDGPUSSARegisterSpiller::tryHoistSpillToNCD(
     }
   }
   
+  // Move virtual spill marker to NCD if enabled
+  if (EnableVirtualSpillMarkers) {
+    // Remove old marker from KillBB (if present)
+    for (MachineInstr &MI : llvm::make_early_inc_range(*KillBB)) {
+      if (MI.getOpcode() == AMDGPU::SI_VIRTUAL_SPILL_MARKER &&
+          MI.getOperand(0).getImm() == (int64_t)SpilledVMP.getVReg().virtRegIndex() &&
+          MI.getOperand(1).getImm() == (int64_t)SpilledVMP.getLaneMask().getAsInteger()) {
+        LIS->RemoveMachineInstrFromMaps(MI);
+        MI.eraseFromParent();
+        break;
+      }
+    }
+    insertVirtualSpillMarker(*NCD, NCD->getFirstTerminator(), SpilledVMP);
+  }
+  
   LLVM_DEBUG(dbgs() << "  Hoisted kill point to: " << printMBBReference(*NCD) << "\n");
   
-  return true;
+  return NCD;
 }
 
 void AMDGPUSSARegisterSpiller::collectDominatedBlocks(
