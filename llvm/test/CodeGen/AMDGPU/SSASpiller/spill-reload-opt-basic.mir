@@ -41,6 +41,12 @@ machineFunctionInfo:
 body:             |
   ; CHECK-LABEL: name: reload_opt_basic
   
+  ; Reload optimizer places ONE reload at NCD (entry block) serving both uses
+  ; CHECK: bb.0.entry:
+  ; CHECK: SI_SPILL_V32_SAVE
+  ; CHECK: SI_VIRTUAL_SPILL_MARKER %x
+  ; CHECK: [[RELOAD:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE
+  
   bb.0.entry:
     successors: %bb.1(0x40000000), %bb.2(0x40000000)
     
@@ -57,8 +63,6 @@ body:             |
     %sum2:vgpr_32 = V_ADD_U32_e32 %sum, %a2, implicit $exec
     %sum3:vgpr_32 = V_ADD_U32_e32 %sum2, %a3, implicit $exec
     
-    ; CHECK: SI_VIRTUAL_SPILL_MARKER %x
-    
     ; Branch to left or right
     %cond:sgpr_32 = S_MOV_B32 0
     S_CMP_EQ_U32 %cond, 0, implicit-def $scc
@@ -68,9 +72,8 @@ body:             |
   bb.1.left:
     successors: %bb.3(0x80000000)
     
-    ; Use %x - should get reloaded value
+    ; Use %x - uses reloaded value from entry block
     ; CHECK: bb.1.left:
-    ; CHECK: [[RELOAD:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE
     ; CHECK: V_ADD_U32_e32 [[RELOAD]]
     %left_result:vgpr_32 = V_ADD_U32_e32 %x, %sum3, implicit $exec
     S_BRANCH %bb.3
@@ -78,10 +81,9 @@ body:             |
   bb.2.right:
     successors: %bb.3(0x80000000)
     
-    ; Use %x - should also get reloaded value
+    ; Use %x - uses same reloaded value from entry block
     ; CHECK: bb.2.right:
-    ; CHECK: [[RELOAD2:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE
-    ; CHECK: V_ADD_U32_e32 [[RELOAD2]]
+    ; CHECK: V_ADD_U32_e32 [[RELOAD]]
     %right_result:vgpr_32 = V_ADD_U32_e32 %x, %sum3, implicit $exec
     S_BRANCH %bb.3
 

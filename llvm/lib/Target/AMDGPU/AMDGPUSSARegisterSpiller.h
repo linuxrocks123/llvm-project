@@ -37,25 +37,34 @@
 
 namespace llvm {
 
-/// Helper data structure for grouping together uses where the head of the group
-/// dominates all the other uses in the group. This allows us to emit a single
-/// reload at the head, and all dominated uses in the group can reuse that
-/// value.
+/// Dom-group: head instruction dominates a list of other uses.
+/// Built once at spill decision time, reused during processing.
 class DomGroup {
-  SmallVector<MachineInstr *> Uses;
-  bool Deleted = false;
+  MachineInstr *Head;
+  SmallVector<MachineInstr *, 4> DominatedUses;
 
 public:
-  DomGroup(MachineInstr *MI) { Uses.push_back(MI); }
-  MachineInstr *getHead() const { return Uses.front(); }
-  bool isDeleted() const { return Deleted; }
-  void merge(DomGroup &Other) {
-    for (auto *MI : Other.Uses)
-      Uses.push_back(MI);
-    Other.Deleted = true;
+  DomGroup(MachineInstr *MI) : Head(MI) {}
+  
+  MachineInstr *getHead() const { return Head; }
+  const SmallVector<MachineInstr *, 4> &getDominatedUses() const { return DominatedUses; }
+  
+  void addDominatedUse(MachineInstr *MI) { DominatedUses.push_back(MI); }
+  
+  void promoteHead(MachineInstr *NewHead) {
+    DominatedUses.push_back(Head);
+    Head = NewHead;
   }
-  const auto &getUses() const { return Uses; }
-  size_t size() const { return Uses.size(); }
+  
+  size_t size() const { return 1 + DominatedUses.size(); }
+};
+
+/// SpillInfo: captures spill decision with pre-built dom-groups.
+struct SpillInfo {
+  VRegMaskPair SpilledVMP;
+  SlotIndex KillIdx;
+  int FrameIndex;
+  SmallVector<DomGroup, 4> DomGroups;
 };
 
 class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
@@ -102,6 +111,9 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   
   // Reload optimizer: cached max RP per block (cleared per spill analysis)
   DenseMap<MachineBasicBlock *, unsigned> MaxRPCache;
+
+  // Track reloads per block to avoid duplicates
+  DenseMap<std::pair<MachineBasicBlock *, Register>, Register> BlockReloadCache;
 
   // TODO: Add tracking for spilled/reloaded registers if needed for
   // verification
@@ -221,22 +233,58 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   /// value.
   Register reloadAtEnd(MachineBasicBlock &MBB, VRegMaskPair VMP);
 
-  /// Emits reload instructions for dominated uses and repairs SSA.
-  ///
-  /// Workflow:
-  /// 1. Find all uses dominated by the spill instruction
-  /// 2. Group uses by dominance chains (one reload per group)
-  /// 3. Emit reload at each group head
-  /// 4. Call MachineLaneSSAUpdater::repairSSAForNewDef() to:
-  ///    - Handle non-dominated uses
-  ///    - Insert PHIs where needed
-  ///    - Rewrite all uses appropriately
-  ///
-  /// NOTE: We only optimize placement for dominated uses. MachineLaneSSAUpdater
-  /// automatically handles all SSA repair including PHI insertion for reachable
-  /// uses, so we don't need to manually compute IDF or classify uses.
-  void emitReloadsAndRepairSSA(VRegMaskPair SpilledVMP, SlotIndex KillIdx,
-                               int FrameIndex);
+  /// Build dom-groups for a register at spill decision time.
+  void buildDomGroupsForSpill(SpillInfo &Info);
+
+  /// Emits reloads and repairs SSA using IDF-first PHI insertion.
+  /// Uses pre-built dom-groups from SpillInfo.
+  void emitReloadsAndRepairSSA(SpillInfo &Info);
+
+  /// Process one PIDF block - insert PHI or reloads as needed.
+  /// Returns the inserted PHI instruction, or nullptr if no PHI was needed.
+  MachineInstr *processPIdfBlock(MachineBasicBlock *PIdfBB, VRegMaskPair SpilledVMP,
+                                 MachineBasicBlock *KillBB,
+                                 const SmallVectorImpl<DomGroup *> &Groups,
+                                 unsigned RPLimit);
+
+  /// Process kill-dominated groups using all DomGroups from Info.
+  void processKillDominatedGroups(SpillInfo &Info, MachineBasicBlock *KillBB,
+                                  unsigned RPLimit);
+
+  /// Process a list of kill-dominated groups.
+  void processKillDominatedGroupsWithList(const SmallVectorImpl<DomGroup *> &Groups,
+                                          VRegMaskPair SpilledVMP,
+                                          MachineBasicBlock *KillBB,
+                                          MachineInstr *KillMI,
+                                          unsigned RPLimit);
+
+  /// Finalize live intervals after all reloads and use rewriting.
+  void finalizeLiveIntervals(Register SpilledReg);
+
+  /// Get or create reload in a block.
+  /// If InsertBefore is provided, inserts before that instruction.
+  /// Otherwise inserts at block end (before terminator) and caches the result.
+  /// Returns {ReloadReg, ReloadMI}. ReloadMI is nullptr if using cached reload.
+  std::pair<Register, MachineInstr *>
+  getOrCreateReloadInBlock(MachineBasicBlock *BB, VRegMaskPair SpilledVMP,
+                           MachineInstr *InsertBefore = nullptr);
+
+  /// Insert reload for a use instruction. For PHI uses, inserts in predecessor blocks.
+  /// For non-PHI uses, handles loop adjustment.
+  bool insertReloadForUse(MachineInstr *UseMI, VRegMaskPair SpilledVMP,
+                          MachineBasicBlock *KillBB);
+
+  /// Emit reload to a specific register.
+  MachineInstr *emitReloadToReg(MachineBasicBlock::iterator InsertBefore,
+                                 VRegMaskPair VMP, Register TargetReg);
+
+  /// Sort PIDF blocks by dominance order.
+  void sortByDominanceOrder(SmallVectorImpl<MachineBasicBlock *> &Blocks);
+
+  /// Find closest dominating PIDF block.
+  MachineBasicBlock *findClosestDominatingPIDF(
+      MachineInstr *UseMI,
+      const SmallVectorImpl<MachineBasicBlock *> &PIdfBlocks);
 
   /// Debug helper: dumps a register set to dbgs().
   void dumpRegSet(const VRegMaskPairSet &Regs) const;
@@ -247,11 +295,14 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   
   /// Walk BFS from \p StartBB through blocks where \p SpilledReg is live.
   /// For each block, finds first use of SpilledReg (if any) and calls IsBad.
-  /// Returns true if all live blocks pass IsBad check, false if any fails.
+  /// \param stopOnBad If true (default), return immediately when IsBad returns true.
+  ///                  If false, continue walking all paths.
+  /// \returns true if all paths OK, false if any bad found.
   bool walkPathsToUses(MachineBasicBlock *StartBB,
                        Register SpilledReg,
                        llvm::function_ref<bool(MachineBasicBlock *,
-                                               MachineInstr *)> IsBad) const;
+                                               MachineInstr *)> IsBad,
+                       bool stopOnBad = true) const;
   
   /// Checks if the given block has any use of SpilledVMP.
   /// If StopInstr is provided and is in this block, only checks up to that instruction.
@@ -282,8 +333,8 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   /// Computes and caches maximum register pressure within a basic block.
   unsigned getMaxRPForBlock(MachineBasicBlock *MBB);
   
-  /// Computes max RP in block from start up to (not including) StopMI.
-  unsigned getMaxRPInBlockUpTo(MachineBasicBlock *MBB, MachineInstr *StopMI);
+  /// Computes max RP in block walking down from StopMI to block start.
+  unsigned getMaxRPInBlockDownTo(MachineBasicBlock *MBB, MachineInstr *StopMI);
   
   /// Checks if reload can be hoisted to NCD by walking paths and checking RP.
   /// InsertPoint is the reload insertion point in NCD (nullptr if no use in NCD).

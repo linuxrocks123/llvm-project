@@ -126,6 +126,18 @@ public:
   /// Clear the IDF cache. Call this if the CFG is modified.
   void clearIDFCache() { IDFCache.clear(); }
 
+  /// Insert a PHI at a join block with explicit incoming values.
+  ///
+  /// \param JoinBB - The block where the PHI will be inserted
+  /// \param OrigVReg - The original register being tracked
+  /// \param IncomingValues - Map from predecessor to incoming register
+  /// \param SpilledMask - Lane mask of the spilled register
+  /// \returns Pointer to the PHI result operand
+  MachineOperand *insertPHIAtBlock(MachineBasicBlock *JoinBB,
+                                   Register OrigVReg,
+                                   const DenseMap<MachineBasicBlock *, Register> &IncomingValues,
+                                   LaneBitmask SpilledMask);
+
   // Public cache key structure for DenseMapInfo specialization
   struct IDFCacheKey {
     Register VReg;
@@ -136,6 +148,21 @@ public:
       return VReg == Other.VReg && Mask == Other.Mask && DefBlockNum == Other.DefBlockNum;
     }
   };
+
+  /// Rewrite dominated uses of OrigVReg to NewSSA according to the
+  /// exact/subset/super policy; create REG_SEQUENCE only when needed.
+  void rewriteDominatedUses(Register OrigVReg,
+                            Register NewSSA,
+                            LaneBitmask MaskToRewrite);
+
+  /// Repair SSA for a reload instruction that already defines a new register.
+  /// This inserts PHIs at IDF blocks and rewrites dominated uses.
+  /// Use this when you've already created a reload that defines NewVReg.
+  /// Returns PHI def operands created during repair.
+  SmallVector<MachineOperand *, 4> repairSSAForReload(Register NewVReg,
+                                                       Register OrigVReg,
+                                                       LaneBitmask DefMask,
+                                                       MachineBasicBlock *DefBB);
 
 private:
   // Common SSA repair logic
@@ -183,12 +210,6 @@ private:
                            Register OrigVReg,
                            Register NewVReg,
                            LaneBitmask DefMask);
-
-  // Rewrite dominated uses of OrigVReg to NewSSA according to the
-  // exact/subset/super policy; create REG_SEQUENCE only when needed.
-  void rewriteDominatedUses(Register OrigVReg,
-                            Register NewSSA,
-                            LaneBitmask MaskToRewrite);
 
   // Cache for IDF computations to avoid redundant calculations
   DenseMap<IDFCacheKey, SmallVector<MachineBasicBlock *, 4>> IDFCache;
