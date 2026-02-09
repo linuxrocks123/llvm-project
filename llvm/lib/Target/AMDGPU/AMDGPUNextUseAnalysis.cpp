@@ -368,7 +368,7 @@ void NextUseResult::analyze(const MachineFunction &MF) {
 
           VRegMaskPair P(MO, TRI, MRI);
           if (MO.isUse()) {
-            Curr.insert(P, -(int64_t)Offset);
+            Curr.insert(P, -(int64_t)Offset, /*ForceCloserToEntry=*/true);
             UsedInBlock[MBB->getNumber()].insert(P);
           } else if (MO.isDef()) {
             Curr.clear(P);
