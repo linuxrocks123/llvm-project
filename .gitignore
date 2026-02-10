@@ -57,6 +57,7 @@ autoconf/autom4te.cache
 /.claude/
 /GEMINI.md
 /.gemini/
+/.cursor/
 
 #==============================================================================#
 # Directories to ignore (do not add trailing '/'s, they skip symlinks).
