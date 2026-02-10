@@ -39,6 +39,8 @@ class NextUseResult {
   const MachineRegisterInfo *MRI;
   const SIRegisterInfo *TRI;
   MachineLoopInfo *LI;
+  const MachineFunction *MF = nullptr;
+  bool Analyzed = false;
 
 public:
   class VRegDistances {
@@ -294,6 +296,7 @@ private:
 
   void init(const MachineFunction &MF);
   void analyze(const MachineFunction &MF);
+  void ensureAnalyzed();
 
   // Core materialization: convert stored relative value + snapshot offset
   // to full materialized distance with bounds checking.
@@ -407,6 +410,10 @@ private:
   void clear() {
     NextUseMap.clear();
     LoopExits.clear();
+    UsedInBlock.clear();
+    EntryOff.clear();
+    Analyzed = false;
+    MF = nullptr;
   }
 
 public:
@@ -444,6 +451,7 @@ public:
   }
 
   VRegMaskPairSet &usedInBlock(MachineBasicBlock &MBB) {
+    ensureAnalyzed();
     return UsedInBlock[MBB.getNumber()];
   }
 

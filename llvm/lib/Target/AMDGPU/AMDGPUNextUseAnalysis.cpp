@@ -192,6 +192,14 @@ static cl::opt<bool>
                  cl::desc("Enable timing for Next Use Analysis"),
                  cl::init(false), cl::Hidden);
 
+// Command-line option to force analysis and dump all distances.
+// When set, ensureAnalyzed() is triggered and all distances are printed.
+// Used by lit tests; analogous to the competitor's -dump-distance flag.
+static cl::opt<bool>
+    DumpDistances("amdgpu-next-use-dump-distance",
+                  cl::desc("Force NUA to run and dump all next-use distances"),
+                  cl::init(false), cl::Hidden);
+
 // Static timers for performance tracking across all analysis runs
 static llvm::TimerGroup TG("amdgpu-next-use", "AMDGPU Next Use Analysis");
 static llvm::Timer AnalyzeTimer("analyze", "Time spent in analyze()", TG);
@@ -466,6 +474,7 @@ collectSubregUses(const NextUseResult::VRegDistances::SortedRecords &Dists,
 SmallVector<VRegMaskPair>
 NextUseResult::getSortedSubregUses(const MachineBasicBlock::iterator I,
                                    const VRegMaskPair VMP) {
+  ensureAnalyzed();
   SmallVector<VRegMaskPair> Result;
   const MachineBasicBlock *MBB = I->getParent();
   unsigned MBBNum = MBB->getNumber();
@@ -486,6 +495,7 @@ NextUseResult::getSortedSubregUses(const MachineBasicBlock::iterator I,
 SmallVector<VRegMaskPair>
 NextUseResult::getSortedSubregUses(const MachineBasicBlock &MBB,
                                    const VRegMaskPair VMP) {
+  ensureAnalyzed();
   SmallVector<VRegMaskPair> Result;
   unsigned MBBNum = MBB.getNumber();
   DenseMap<unsigned, NextUseInfo>::iterator MBBIt = NextUseMap.find(MBBNum);
@@ -510,6 +520,7 @@ void NextUseResult::dumpUsedInBlock() {
 
 unsigned NextUseResult::getNextUseDistance(const MachineBasicBlock::iterator I,
                                            const VRegMaskPair VMP) {
+  ensureAnalyzed();
   if (EnableTimers)
     GetDistanceTimer.startTimer();
 
@@ -536,6 +547,7 @@ unsigned NextUseResult::getNextUseDistance(const MachineBasicBlock::iterator I,
 
 unsigned NextUseResult::getNextUseDistance(const MachineBasicBlock &MBB,
                                            const VRegMaskPair VMP) {
+  ensureAnalyzed();
   if (EnableTimers)
     GetDistanceTimer.startTimer();
 
@@ -579,10 +591,22 @@ bool AMDGPUNextUseAnalysisWrapper::runOnMachineFunction(MachineFunction &MF) {
   NU.MRI = &MF.getRegInfo();
   NU.TRI = MF.getSubtarget<GCNSubtarget>().getRegisterInfo();
   assert(NU.MRI->isSSA());
-  NU.init(MF);
-  NU.analyze(MF);
-  //  LLVM_DEBUG(NU.dump());
+  // Defer init() + analyze() to the first query via ensureAnalyzed().
+  // If the spiller finds no register pressure issues, NUA does zero work.
+  NU.MF = &MF;
+  NU.Analyzed = false;
+  if (DumpDistances)
+    NU.dumpAllNextUseDistances(MF);
   return false;
+}
+
+void NextUseResult::ensureAnalyzed() {
+  if (!Analyzed) {
+    assert(MF && "MachineFunction not set — was runOnMachineFunction called?");
+    init(*MF);
+    analyze(*MF);
+    Analyzed = true;
+  }
 }
 
 void AMDGPUNextUseAnalysisWrapper::getAnalysisUsage(AnalysisUsage &AU) const {
@@ -598,15 +622,15 @@ AMDGPUNextUseAnalysisWrapper::AMDGPUNextUseAnalysisWrapper()
 }
 
 void NextUseResult::dumpAllNextUseDistances(const MachineFunction &MF) {
-  LLVM_DEBUG(dbgs() << "=== NextUseAnalysis Results for " << MF.getName()
-                    << " ===\n");
+  ensureAnalyzed();
+  dbgs() << "=== NextUseAnalysis Results for " << MF.getName() << " ===\n";
 
   for (const MachineBasicBlock &MBB : MF) {
     const unsigned MBBNum = MBB.getNumber();
-    LLVM_DEBUG(dbgs() << "\n--- MBB_" << MBBNum << " ---\n");
+    dbgs() << "\n--- MBB_" << MBBNum << " ---\n";
 
     if (!NextUseMap.contains(MBBNum)) {
-      LLVM_DEBUG(dbgs() << "  No analysis data for this block\n");
+      dbgs() << "  No analysis data for this block\n";
       continue;
     }
 
@@ -617,12 +641,12 @@ void NextUseResult::dumpAllNextUseDistances(const MachineFunction &MF) {
          II != IE; ++II) {
       const MachineInstr &MI = *II;
 
-      LLVM_DEBUG(dbgs() << "  Instr: ");
-      LLVM_DEBUG(MI.print(dbgs(), /*IsStandalone=*/false, /*SkipOpers=*/false,
-                          /*SkipDebugLoc=*/true, /*AddNewLine=*/false));
-      LLVM_DEBUG(dbgs() << "\n");
+      dbgs() << "  Instr: ";
+      MI.print(dbgs(), /*IsStandalone=*/false, /*SkipOpers=*/false,
+               /*SkipDebugLoc=*/true, /*AddNewLine=*/false);
+      dbgs() << "\n";
 
-      LLVM_DEBUG(dbgs() << "    Next-use distances:\n");
+      dbgs() << "    Next-use distances:\n";
       DenseMap<const MachineInstr *, VRegDistances>::const_iterator InstrIt =
           Info.InstrDist.find(&MI);
       if (InstrIt != Info.InstrDist.end()) {
@@ -631,20 +655,20 @@ void NextUseResult::dumpAllNextUseDistances(const MachineFunction &MF) {
         const bool Any =
             printVregDistances(Dists, SnapOff, 0, dbgs(), "      ");
         if (!Any)
-          LLVM_DEBUG(dbgs() << "      (no register uses)\n");
+          dbgs() << "      (no register uses)\n";
       } else {
-        LLVM_DEBUG(dbgs() << "      (no distance data)\n");
+        dbgs() << "      (no distance data)\n";
       }
-      LLVM_DEBUG(dbgs() << "\n");
+      dbgs() << "\n";
     }
 
     // Block-end dump (materialized with offset = 0).
-    LLVM_DEBUG(dbgs() << "  Block End Distances:\n");
+    dbgs() << "  Block End Distances:\n";
     const bool AnyEnd = printVregDistances(Info.Bottom, /*SnapshotOffset=*/0,
                                            /* EdgeWeight */ 0, dbgs(), "    ");
     if (!AnyEnd)
-      LLVM_DEBUG(dbgs() << "    (no registers live at block end)\n");
+      dbgs() << "    (no registers live at block end)\n";
   }
 
-  LLVM_DEBUG(dbgs() << "\n=== End NextUseAnalysis Results ===\n");
+  dbgs() << "\n=== End NextUseAnalysis Results ===\n";
 }
