@@ -144,14 +144,14 @@
 # CHECK: Vreg: %1[ 1 ]
 # CHECK: Vreg: %8[ LoopTag*2+10 ]
 # CHECK: Vreg: %3[ LoopTag+5 ]
-# CHECK: Vreg: %5[ 2 ]
+# CHECK: Vreg: %5[ 1 ]
 # CHECK: Instr: S_CMP_LT_I32 %5, %1, implicit-def $scc
 # CHECK-NEXT: Next-use distances:
 # CHECK: Vreg: %0[ LoopTag+6 ]
 # CHECK: Vreg: %1[ 0 ]
 # CHECK: Vreg: %8[ LoopTag*2+9 ]
 # CHECK: Vreg: %3[ LoopTag+4 ]
-# CHECK: Vreg: %5[ 1 ]
+# CHECK: Vreg: %5[ 0 ]
 # CHECK: Instr: %6:sgpr_32 = S_ADD_U32 %5, 1, implicit-def $scc
 # CHECK-NEXT: Next-use distances:
 # CHECK: Vreg: %0[ LoopTag+5 ]
