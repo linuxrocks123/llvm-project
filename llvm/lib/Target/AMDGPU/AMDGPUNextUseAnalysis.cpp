@@ -245,7 +245,7 @@ void NextUseResult::init(const MachineFunction &MF) {
     L->getExitEdges(Exiting);
     for (const std::pair<MachineBasicBlock *, MachineBasicBlock *> &P :
          Exiting) {
-      LoopExits[P.first->getNumber()] = P.second->getNumber();
+      LoopExits.insert({P.first->getNumber(), P.second->getNumber()});
     }
   }
 }
@@ -293,12 +293,8 @@ void NextUseResult::analyze(const MachineFunction &MF) {
 
         // Check if the edge from MBB to Succ goes out of the Loop
         int64_t EdgeWeight = 0;
-        DenseMap<unsigned, unsigned>::iterator LoopExitIt =
-            LoopExits.find(MBB->getNumber());
-        if (LoopExitIt != LoopExits.end()) {
-          if (SuccNum == LoopExitIt->second)
-            EdgeWeight = LoopTag;
-        }
+        if (LoopExits.contains({MBB->getNumber(), SuccNum}))
+          EdgeWeight = LoopTag;
 
         if (LI->getLoopDepth(MBB) < LI->getLoopDepth(Succ)) {
           // MBB->Succ is entering the Succ's loop (analysis exiting the loop)

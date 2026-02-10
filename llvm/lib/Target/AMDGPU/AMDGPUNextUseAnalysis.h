@@ -17,6 +17,7 @@
 #define LLVM_LIB_TARGET_AMDGPU_NEXT_USE_ANALYSIS_H
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/SlotIndexes.h"
 
@@ -282,7 +283,7 @@ public:
 public:
 private:
   DenseMap<unsigned, VRegMaskPairSet> UsedInBlock;
-  DenseMap<unsigned, unsigned> LoopExits;
+  DenseSet<std::pair<unsigned, unsigned>> LoopExits;
   // Signed tag used to mark "outside current loop" in stored values.
   // Must be >> any finite distance you can accumulate in one function.
   static constexpr int64_t LoopTag = (int64_t)1 << 40; // ~1e12 headroom
