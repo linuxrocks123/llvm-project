@@ -331,19 +331,21 @@ void NextUseResult::analyze(const MachineFunction &MF) {
           printVregDistances(SuccDist, EntryOff[SuccNum], EdgeWeight);
         });
 
-        // Filter out successor's PHI operands with SourceBlock != MBB
-        // PHI operands are only live on their specific incoming edge
+        // Add PHI uses for this specific edge (MBB -> Succ).
+        // PHI uses are edge-specific and not stored in UpwardNextUses,
+        // so we add only the operands relevant to this predecessor.
         for (MachineInstr &PHI : Succ->phis()) {
-          // Check each PHI operand pair (value, source block)
           for (unsigned OpIdx = 1; OpIdx < PHI.getNumOperands(); OpIdx += 2) {
             const MachineOperand &UseOp = PHI.getOperand(OpIdx);
             const MachineOperand &BlockOp = PHI.getOperand(OpIdx + 1);
-
-            // Skip if this operand doesn't come from current MBB
-            if (BlockOp.getMBB() != MBB) {
+            // Only add the operand that comes from current MBB
+            if (BlockOp.getMBB() == MBB) {
+              if (UseOp.isUndef())
+                continue;
               VRegMaskPair PhiVMP(UseOp, TRI, MRI);
-              // Remove this PHI operand from the successor distances
-              SuccDist.clear(PhiVMP);
+              // PHI use is at the block top (offset = EntryOff)
+              SuccDist.insert(PhiVMP, -(int64_t)EntryOff[SuccNum],
+                              /*ForceCloserToEntry=*/true);
             }
           }
         }
@@ -368,8 +370,12 @@ void NextUseResult::analyze(const MachineFunction &MF) {
 
           VRegMaskPair P(MO, TRI, MRI);
           if (MO.isUse()) {
-            Curr.insert(P, -(int64_t)Offset, /*ForceCloserToEntry=*/true);
-            UsedInBlock[MBB->getNumber()].insert(P);
+            // Skip PHI uses — they are edge-specific and will be
+            // added per-edge during successor merge.
+            if (!MI.isPHI()) {
+              Curr.insert(P, -(int64_t)Offset, /*ForceCloserToEntry=*/true);
+              UsedInBlock[MBB->getNumber()].insert(P);
+            }
           } else if (MO.isDef()) {
             Curr.clear(P);
             UsedInBlock[MBB->getNumber()].remove(P);
