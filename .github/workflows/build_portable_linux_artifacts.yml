@@ -286,8 +286,10 @@ jobs:
       - name: Post Build Upload
         if: always()
         run: |
+          git diff --submodule=diff > build/patches.diff
+          cp -a .git build
           python3 build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
             --artifact-group "${{ inputs.artifact_group }}" \
-            --build-dir . \
+            --build-dir build \
             --upload
