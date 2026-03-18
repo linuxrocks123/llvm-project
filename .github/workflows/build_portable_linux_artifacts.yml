@@ -287,7 +287,7 @@ jobs:
         if: always()
         run: |
           git diff --submodule=diff > patches.diff
-          tar cJvf build/git_checkout.tar.xz .git patches.diff
+          tar cJvf build/artifacts/git_checkout.tar.xz .git patches.diff
           python3 build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
             --artifact-group "${{ inputs.artifact_group }}" \
