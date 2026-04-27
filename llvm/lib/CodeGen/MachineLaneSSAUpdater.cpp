@@ -968,7 +968,6 @@ LaneBitmask MachineLaneSSAUpdater::operandLaneMask(const MachineOperand &MO) {
 
 /// Helper: Decompose a potentially non-contiguous lane mask into a vector of
 /// subregister indices that together cover all lanes in the mask.
-/// From getCoveringSubRegsForLaneMask in AMDGPUSSARAUtils.h (PR #156049).
 ///
 /// Key algorithm: Sort candidates by lane count (prefer larger subregs) to get
 /// minimal covering set with largest possible subregisters.

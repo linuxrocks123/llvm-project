@@ -8,7 +8,6 @@
 
 #include "AMDGPUSSARegisterSpiller.h"
 #include "AMDGPU.h"
-#include "AMDGPUSSARAUtils.h"
 #include "GCNRegPressure.h"
 #include "GCNSubtarget.h"
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
@@ -1442,7 +1441,7 @@ bool AMDGPUSSARegisterSpiller::insertReloadForUse(
         continue;
       
       // Check if this PHI operand's lanes overlap with spilled lanes
-      LaneBitmask UseMask = getOperandLaneMask(ValOp, TRI, MRI);
+      LaneBitmask UseMask = VRegMaskPair(ValOp, TRI, MRI).getLaneMask();
       if ((UseMask & SpilledMask).none())
         continue;
       
@@ -2203,7 +2202,7 @@ bool AMDGPUSSARegisterSpiller::usesSpilledVMP(const MachineInstr *MI,
   // Found a use, now check if it overlaps with spilled lanes
   for (const MachineOperand &MO : MI->uses()) {
     if (MO.isReg() && MO.getReg() == SpilledReg) {
-      LaneBitmask UseMask = getOperandLaneMask(MO, TRI, MRI);
+      LaneBitmask UseMask = VRegMaskPair(MO, TRI, MRI).getLaneMask();
       // Check if this use overlaps with the spilled lanes
       if ((UseMask & SpilledMask).any()) {
         return true;
