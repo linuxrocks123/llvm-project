@@ -86,16 +86,6 @@ get_global_size_z(void)
     }
 }
 
-// Compute the uniform (enqueued) work-group size on the legacy ABI path.
-// Historically __builtin_amdgcn_workgroup_size_{x,y,z}() returned this value
-// (a direct load from the HSA dispatch packet), but a later clang change made
-// the builtin emit the *actual* size of the current work-group, which differs
-// from the uniform size for the trailing partial group when work-groups are
-// non-uniform (OpenCL 2.0+ default). The functions in this file that compute
-// global IDs, num-groups, enqueued-local-size, and global-linear-IDs all need
-// the uniform size; using the builtin here would return wrong results for
-// every work-item in the partial group. Read the dispatch packet directly
-// instead.
 ATTR static size_t
 get_global_id_x(void)
 {
