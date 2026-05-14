@@ -1,0 +1,33 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs -run-pass=amdgpu-ssa-register-allocator \
+# RUN:   -debug-only=amdgpu-ssa-register-allocator -o /dev/null %s 2>&1 | FileCheck %s
+# REQUIRES: asserts
+
+# Physreg reuse: %0(128-bit) dies, then %2(64-bit) should reuse vgpr0-1.
+# %1(128-bit) stays alive throughout, occupying vgpr4-7.
+
+# CHECK: Coloring order (width descending): 128 64
+# CHECK: Coloring result:
+# CHECK-DAG: %0 -> VGPR0_VGPR1_VGPR2_VGPR3
+# CHECK-DAG: %1 -> VGPR4_VGPR5_VGPR6_VGPR7
+# CHECK-DAG: %2 -> VGPR0_VGPR1
+
+--- |
+  define amdgpu_kernel void @test_reuse_after_death() #0 { ret void }
+  attributes #0 = { "target-cpu"="gfx1200" }
+...
+---
+name:            test_reuse_after_death
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vreg_128 }
+  - { id: 1, class: vreg_128 }
+  - { id: 2, class: vreg_64 }
+body: |
+  bb.0:
+    %0:vreg_128 = IMPLICIT_DEF
+    %1:vreg_128 = IMPLICIT_DEF
+    S_NOP 0, implicit %0
+    %2:vreg_64 = IMPLICIT_DEF
+    S_ENDPGM 0, implicit %1, implicit %2
+...

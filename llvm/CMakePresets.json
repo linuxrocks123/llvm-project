@@ -1,288 +1,90 @@
 {
-    "version": 6,
-    "configurePresets": [
-        {
-            "name": "base",
-            "displayName": "[hidden] base",
-            "hidden": true,
-            "generator": "Ninja",
-            "binaryDir": "${sourceDir}/../build/${presetName}",
-            "cacheVariables": {
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "CMAKE_C_COMPILER": "clang",
-                "CMAKE_CXX_COMPILER": "clang++",
-                "LLVM_ENABLE_LIBCXX": "ON"
-            }
-        },
-        {
-            "name": "platform-host-linux",
-            "displayName": "[hidden] platform host linux",
-            "hidden": true,
-            "cacheVariables": {
-                "LLDB_RELOCATABLE_PYTHON": "1"
-            }
-        },
-        {
-            "name": "config-llvm",
-            "displayName": "[hidden] llvm config",
-            "hidden": true,
-            "cacheVariables": {
-                "LLVM_TARGETS_TO_BUILD": "X86;AMDGPU",
-                "LLVM_INCLUDE_TESTS": true,
-                "LLVM_LIT_ARGS": "-svj 16",
-                "LLVM_PARALLEL_LINK_JOBS": "2",
-                "LLVM_CCACHE_BUILD": "On",
-                "LLVM_CCACHE_MAXSIZE": "20G",
-                "LLVM_ENABLE_IDE": "On",
-                "PYTHON_EXECUTABLE": "/usr/bin/python3",
-                "LLVM_ENABLE_PROJECTS": "llvm;clang;lld",
-                "CMAKE_CXX_STANDARD": "17",
-                "BUILD_SHARED_LIBS": "OFF"
-            }
-        },
-        {
-            "name": "bt-Debug",
-            "displayName": "[hidden] bt Debug",
-            "hidden": true,
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "LLVM_OPTIMIZED_TABLEGEN": "ON"
-            }
-        },
-        {
-            "name": "bt-RelWithDebInfo",
-            "displayName": "[hidden] bt RelWithDebInfo",
-            "hidden": true,
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
-            }
-        },
-        {
-            "name": "bt-MinSizeRel",
-            "displayName": "[hidden] bt MinSizeRel",
-            "hidden": true,
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "MinSizeRel"
-            }
-        },
-        {
-            "name": "bt-Release",
-            "displayName": "[hidden] bt Release",
-            "hidden": true,
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
-            }
-        },
-        {
-            "name": "feat-asan",
-            "displayName": "[hidden] AddressSanitizer",
-            "hidden": true,
-            "cacheVariables": {
-                "LLVM_USE_SANITIZER": "Address"
-            }
-        },
-        {
-            "name": "feat-asserts-on",
-            "displayName": "[hidden] Asserts ON",
-            "hidden": true,
-            "cacheVariables": {
-                "LLVM_ENABLE_ASSERTIONS": "ON"
-            }
-        },
-        {
-            "name": "feat-asserts-off",
-            "displayName": "[hidden] Asserts OFF",
-            "hidden": true,
-            "cacheVariables": {
-                "LLVM_ENABLE_ASSERTIONS": "OFF"
-            }
-        },
-        {
-            "name": "Debug",
-            "displayName": "Debug",
-            "inherits": [
-                "base",
-                "platform-host-linux",
-                "config-llvm",
-                "bt-Debug"
-            ]
-        },
-        {
-            "name": "Debug-asan",
-            "displayName": "DebugWithAsan",
-            "inherits": [
-                "base",
-                "platform-host-linux",
-                "config-llvm",
-                "bt-Debug",
-                "feat-asan"
-            ]
-        },
-        {
-            "name": "Relwithdebinfo",
-            "displayName": "RelWithDebInfo",
-            "inherits": [
-                "base",
-                "platform-host-linux",
-                "config-llvm",
-                "bt-RelWithDebInfo"
-            ]
-        },
-        {
-            "name": "Minsizerel",
-            "displayName": "MinSizeRel",
-            "inherits": [
-                "base",
-                "platform-host-linux",
-                "config-llvm",
-                "bt-MinSizeRel"
-            ]
-        },
-        {
-            "name": "Release",
-            "displayName": "Release (asserts OFF)",
-            "inherits": [
-                "base",
-                "platform-host-linux",
-                "config-llvm",
-                "bt-Release",
-                "feat-asserts-off"
-            ]
-        },
-        {
-            "name": "Release-with-asserts",
-            "displayName": "Release (asserts ON)",
-            "inherits": [
-                "base",
-                "platform-host-linux",
-                "config-llvm",
-                "bt-Release",
-                "feat-asserts-on"
-            ]
-        }
-    ],
-    "buildPresets": [
-        {
-            "name": "build-debug",
-            "displayName": "Build Debug",
-            "configurePreset": "Debug"
-        },
-        {
-            "name": "build-debug-asan",
-            "displayName": "Build DebugWithAsan",
-            "configurePreset": "Debug-asan"
-        },
-        {
-            "name": "build-relwithdebinfo",
-            "displayName": "Build RelWithDebInfo",
-            "configurePreset": "Relwithdebinfo"
-        },
-        {
-            "name": "build-minsizerel",
-            "displayName": "Build MinSizeRel",
-            "configurePreset": "Minsizerel"
-        },
-        {
-            "name": "build-release",
-            "displayName": "Build Release (asserts OFF)",
-            "configurePreset": "Release"
-        },
-        {
-            "name": "build-release-with-asserts",
-            "displayName": "Build Release (asserts ON)",
-            "configurePreset": "Release-with-asserts"
-        },
-        {
-            "name": "build-llc",
-            "displayName": "Build llc only",
-            "configurePreset": "Debug",
-            "targets": ["llc"]
-        },
-        {
-            "name": "build-clang",
-            "displayName": "Build clang only", 
-            "configurePreset": "Debug",
-            "targets": ["clang"]
-        },
-        {
-            "name": "build-opt",
-            "displayName": "Build opt only",
-            "configurePreset": "Debug", 
-            "targets": ["opt"]
-        },
-        {
-            "name": "build-lld",
-            "displayName": "Build lld only",
-            "configurePreset": "Debug",
-            "targets": ["lld"]
-        },
-        {
-            "name": "build-llvm-as",
-            "displayName": "Build llvm-as only",
-            "configurePreset": "Debug",
-            "targets": ["llvm-as"]
-        },
-        {
-            "name": "build-llvm-dis",
-            "displayName": "Build llvm-dis only", 
-            "configurePreset": "Debug",
-            "targets": ["llvm-dis"]
-        },
-        {
-            "name": "build-lli",
-            "displayName": "Build lli only",
-            "configurePreset": "Debug",
-            "targets": ["lli"]
-        },
-        {
-            "name": "build-llvm-link",
-            "displayName": "Build llvm-link only",
-            "configurePreset": "Debug", 
-            "targets": ["llvm-link"]
-        }
-    ],
-    "testPresets": [
-        {
-            "name": "test-debug",
-            "configurePreset": "Debug",
-            "output": {
-                "outputOnFailure": true
-            }
-        },
-        {
-            "name": "test-debug-asan",
-            "configurePreset": "Debug-asan",
-            "output": {
-                "outputOnFailure": true
-            }
-        },
-        {
-            "name": "test-relwithdebinfo",
-            "configurePreset": "Relwithdebinfo",
-            "output": {
-                "outputOnFailure": true
-            }
-        },
-        {
-            "name": "test-minsizerel",
-            "configurePreset": "Minsizerel",
-            "output": {
-                "outputOnFailure": true
-            }
-        },
-        {
-            "name": "test-release",
-            "configurePreset": "Release",
-            "output": {
-                "outputOnFailure": true
-            }
-        },
-        {
-            "name": "test-release-asserts",
-            "configurePreset": "Release-with-asserts",
-            "output": {
-                "outputOnFailure": true
-            }
-        }
-    ]
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "llvm-build-shared-libs",
+      "hidden": true,
+      "description": "Build shared libraries",
+      "cacheVariables": {
+        "BUILD_SHARED_LIBS": true
+      }
+    },
+    {
+      "name": "llvm-build-tests",
+      "hidden": true,
+      "description": "Build tests",
+      "cacheVariables": {
+        "LLVM_BUILD_TESTS": true
+      }
+    },
+    {
+      "name": "llvm-enable-assertions",
+      "hidden": true,
+      "description": "Enable runtime assertions",
+      "cacheVariables": {
+        "LLVM_ENABLE_ASSERTIONS": true
+      }
+    },
+    {
+      "name": "llvm-enable-projects-clang",
+      "hidden": true,
+      "description": "Enable projects clang",
+      "cacheVariables": {
+        "LLVM_ENABLE_PROJECTS": "clang"
+      }
+    },
+    {
+      "name": "llvm-enable-projects-clang-tools-extra",
+      "hidden": true,
+      "description": "Enable projects clang, clang-tools-extra",
+      "cacheVariables": {
+        "LLVM_ENABLE_PROJECTS": "clang;clang-tools-extra"
+      }
+    },
+    {
+      "name": "llvm-enable-lto",
+      "hidden": true,
+      "description": "Enable link time optimizations (LTO)",
+      "cacheVariables": {
+        "LLVM_ENABLE_LTO": true
+      }
+    },
+    {
+      "name": "llvm-export-compile-commands",
+      "hidden": true,
+      "description": "Generate a compile_commands.json database",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true
+      }
+    },
+    {
+      "name": "llvm-no-build-testing",
+      "hidden": true,
+      "description": "Turn off building of tests",
+      "cacheVariables": {
+        "BUILD_TESTING": false
+      }
+    },
+    {
+      "name": "llvm-target-x86",
+      "hidden": true,
+      "description": "Only target x86 back end",
+      "cacheVariables": {
+        "LLVM_TARGETS_TO_BUILD": "X86"
+      }
+    },
+    {
+      "name": "llvm-use-sanitizer-asan",
+      "hidden": true,
+      "description": "Build with ASAN",
+      "cacheVariables": {
+        "LLVM_USE_SANITIZER": "Address"
+      }
+    }
+  ]
 }

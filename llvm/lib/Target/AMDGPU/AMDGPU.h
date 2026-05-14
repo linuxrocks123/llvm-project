@@ -104,6 +104,10 @@ MachineFunctionPass *createAMDGPUSSARegisterSpillerPass();
 void initializeAMDGPUSSARegisterSpillerPass(PassRegistry &);
 extern char &AMDGPUSSARegisterSpillerID;
 
+MachineFunctionPass *createAMDGPUSSARegisterAllocatorPass();
+void initializeAMDGPUSSARegisterAllocatorPass(PassRegistry &);
+extern char &AMDGPUSSARegisterAllocatorID;
+
 // DPP/Iterative option enables the atomic optimizer with given strategy
 // whereas None disables the atomic optimizer.
 enum class ScanOptions { DPP, Iterative, None };

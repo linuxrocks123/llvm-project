@@ -1,0 +1,28 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs -run-pass=amdgpu-ssa-register-allocator \
+# RUN:   -debug-only=amdgpu-ssa-register-allocator -o /dev/null %s 2>&1 | FileCheck %s
+# REQUIRES: asserts
+
+# SGPR and VGPR assigned independently from non-overlapping register files.
+# Both start at index 0 in their respective files.
+
+# CHECK: Coloring result:
+# CHECK-DAG: %0 -> VGPR0
+# CHECK-DAG: %1 -> SGPR0
+
+--- |
+  define amdgpu_kernel void @test_sgpr_vgpr_mix() #0 { ret void }
+  attributes #0 = { "target-cpu"="gfx1200" }
+...
+---
+name:            test_sgpr_vgpr_mix
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vgpr_32 }
+  - { id: 1, class: sgpr_32 }
+body: |
+  bb.0:
+    %0:vgpr_32 = V_MOV_B32_e32 0, implicit $exec
+    %1:sgpr_32 = S_MOV_B32 0
+    S_ENDPGM 0, implicit %0, implicit %1
+...

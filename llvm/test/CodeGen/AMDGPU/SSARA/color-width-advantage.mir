@@ -1,0 +1,74 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs -run-pass=amdgpu-ssa-register-allocator \
+# RUN:   -debug-only=amdgpu-ssa-register-allocator -o /dev/null %s 2>&1 | FileCheck %s
+# REQUIRES: asserts
+
+# Width-descending advantage over naive single-pass.
+#
+# VRegs: A(%0, 128), B(%1, 32), C(%2, 64), D(%3, 32), E(%4, 128)
+#
+# bb.0: define A, E (both 128-bit, interfere — both live in bb.0)
+#        define C (64-bit, interferes with A and E)
+#        define D (32-bit, interferes with A, E, C)
+#        use C (last use — C dies here)
+# bb.1: define B (32-bit) — C is dead, B does NOT interfere with C
+#        use B (last use — B dies here)
+# bb.2: use A, D, E
+#
+# Max RP = in bb.0: A(4) + E(4) + C(2) + D(1) = 11
+#
+# Width-descending:
+#   Pass 128: A->0-3, E->4-7
+#   Pass 64:  C->8-9 (A and E live-in to bb.0, block 0-7)
+#   Pass 32:  D->10, B->8 (C dead in bb.1, reuse vgpr8)
+#   Total = 11 = max RP
+#
+# Naive single-pass would give 12 > max RP.
+
+# CHECK: Coloring order (width descending): 128 64 32
+# CHECK: Coloring result:
+# CHECK-DAG: %0 -> VGPR0_VGPR1_VGPR2_VGPR3
+# CHECK-DAG: %4 -> VGPR4_VGPR5_VGPR6_VGPR7
+# CHECK-DAG: %2 -> VGPR8_VGPR9
+# CHECK-DAG: %3 -> VGPR10
+# CHECK-DAG: %1 -> VGPR8
+
+--- |
+  define amdgpu_kernel void @test_width_advantage() #0 {
+  bb0:
+    br label %bb1
+  bb1:
+    br label %bb2
+  bb2:
+    ret void
+  }
+  attributes #0 = { "target-cpu"="gfx1200" }
+...
+---
+name:            test_width_advantage
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vreg_128 }
+  - { id: 1, class: vgpr_32 }
+  - { id: 2, class: vreg_64 }
+  - { id: 3, class: vgpr_32 }
+  - { id: 4, class: vreg_128 }
+body: |
+  bb.0:
+    successors: %bb.1
+    %0:vreg_128 = IMPLICIT_DEF
+    %4:vreg_128 = IMPLICIT_DEF
+    %2:vreg_64 = IMPLICIT_DEF
+    %3:vgpr_32 = V_MOV_B32_e32 0, implicit $exec
+    S_NOP 0, implicit %2
+    S_BRANCH %bb.1
+
+  bb.1:
+    successors: %bb.2
+    %1:vgpr_32 = V_MOV_B32_e32 0, implicit $exec
+    S_NOP 0, implicit %1
+    S_BRANCH %bb.2
+
+  bb.2:
+    S_ENDPGM 0, implicit %0, implicit %3, implicit %4
+...
