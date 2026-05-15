@@ -1,0 +1,35 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs -run-pass=amdgpu-ssa-register-allocator \
+# RUN:   -debug-only=amdgpu-ssa-register-allocator -o /dev/null %s 2>&1 | FileCheck %s
+# REQUIRES: asserts
+#
+# Splitter no-op: few vregs, max physreg index well within occupancy threshold.
+# No splits should occur.
+#
+# Live ranges:
+#   %0(32) |-----|
+#   %1(32) |-----|
+#
+# Coloring: %0->vgpr0, %1->vgpr1. Max index = 2.
+# Default VGPR limit is large (256), occupancy already maximal.
+# Splitter has nothing to do.
+
+# CHECK: Coloring result:
+# CHECK-NOT: Split for occupancy
+
+--- |
+  define amdgpu_kernel void @test_split_noop() #0 { ret void }
+  attributes #0 = { "target-cpu"="gfx1200" }
+...
+---
+name:            test_split_noop
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vgpr_32 }
+  - { id: 1, class: vgpr_32 }
+body: |
+  bb.0:
+    %0:vgpr_32 = V_MOV_B32_e32 0, implicit $exec
+    %1:vgpr_32 = V_MOV_B32_e32 1, implicit $exec
+    S_ENDPGM 0, implicit %0, implicit %1
+...

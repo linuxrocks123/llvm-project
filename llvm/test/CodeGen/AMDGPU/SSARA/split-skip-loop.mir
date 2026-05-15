@@ -1,0 +1,66 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs -run-pass=amdgpu-ssa-register-allocator \
+# RUN:   -debug-only=amdgpu-ssa-register-allocator -o /dev/null %s 2>&1 | FileCheck %s
+# REQUIRES: asserts
+#
+# Split point inside a loop should be skipped (COPY cost too high).
+#
+# CFG:
+#   bb.0 (entry)
+#     |
+#     v
+#   bb.1 (loop) <--+
+#     |            |
+#     +------------+
+#     |
+#     v
+#   bb.2 (exit)
+#
+# Live ranges:
+#   A(%0,128) |-----------|
+#   E(%1,128) |--------------------------|
+#   B(%2,32)  |--------------------------|
+#              bb.0      bb.1        bb.2
+#
+# A dies inside loop body (bb.1). Splitter should skip this split point
+# because inserting a COPY in a loop is too expensive.
+# No splits should occur.
+
+# CHECK: Coloring result:
+# CHECK-NOT: Split for occupancy
+
+--- |
+  define amdgpu_kernel void @test_split_skip_loop() #0 {
+  entry:
+    br label %loop
+  loop:
+    br i1 undef, label %loop, label %exit
+  exit:
+    ret void
+  }
+  attributes #0 = { "amdgpu-num-vgpr"="12" "target-cpu"="gfx1200" }
+...
+---
+name:            test_split_skip_loop
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vreg_128 }
+  - { id: 1, class: vreg_128 }
+  - { id: 2, class: vgpr_32 }
+body: |
+  bb.0:
+    successors: %bb.1
+    %0:vreg_128 = IMPLICIT_DEF
+    %1:vreg_128 = IMPLICIT_DEF
+    %2:vgpr_32 = V_MOV_B32_e32 0, implicit $exec
+    S_BRANCH %bb.1
+
+  bb.1:
+    successors: %bb.1, %bb.2
+    S_NOP 0, implicit %0
+    S_CBRANCH_EXECZ %bb.1, implicit $exec
+    S_BRANCH %bb.2
+
+  bb.2:
+    S_ENDPGM 0, implicit %1, implicit %2
+...

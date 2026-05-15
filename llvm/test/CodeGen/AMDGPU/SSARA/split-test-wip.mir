@@ -1,0 +1,75 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx900 -verify-machineinstrs -run-pass=amdgpu-ssa-register-allocator \
+# RUN:   -debug-only=amdgpu-ssa-register-allocator -o /dev/null %s 2>&1 | FileCheck %s
+# REQUIRES: asserts
+#
+# Split test scenario:
+#
+#   bb.0:                          bb.1:                      bb.2:
+#   %0(128) %1(128) %2(128)       %0 dies                    %3(128) defined
+#   all 3 live = 12 VGPRs         %1,%2 live = 8             %1,%2,%3 live = 12
+#
+# Coloring 128-bit: %0→0-3, %1→4-7, %2→8-11. %0 dies. %3→0-3 (reuse). Max=12.
+# gfx900: 12 VGPRs → occ=10. Already max. No split.
+#
+# Need to push above a threshold. Use 8 vregs:
+# bb.0: %0..%6 (7 x 128 = 28), %0 dies, %7 defined in bb.1
+# %8(128) lives across everything = total 32 at peak
+#
+# Actually: %0-%6 + %8 = 8 x 128 = 32 peak in bb.0
+# %0 dies. bb.1: %1-%6 + %7 + %8 = 8 x 128 = 32 peak
+# Max = 32, occ=8. Target=9 needs ≤28.
+#
+# Splitter: split %8 at %0's death → %8'→0-3 (freed by %0).
+# %8's original slot freed → %7 (defined after %0 dies) could use it.
+# But %7 already got 0-3 from coloring reuse...
+#
+# Let me try: %8 defined in bb.0, lives to bb.2. %7 NOT defined.
+# bb.0: %0-%6 + %8 = 32. %0 dies.
+# Max = 32. Only 7 survive + %8 = 28+4 = 32. Can't reduce below 28+4.
+# Split %8 at %0's death: %8'→0-3. %8 shortened. Max = 28. Done!
+
+# CHECK: Split for occupancy
+# CHECK: Split %
+
+--- |
+  define amdgpu_kernel void @split_test() #0 {
+  bb0:
+    br label %bb1
+  bb1:
+    ret void
+  }
+  attributes #0 = { "target-cpu"="gfx900" }
+...
+---
+name:            split_test
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vreg_128 }
+  - { id: 1, class: vreg_128 }
+  - { id: 2, class: vreg_128 }
+  - { id: 3, class: vreg_128 }
+  - { id: 4, class: vreg_128 }
+  - { id: 5, class: vreg_128 }
+  - { id: 6, class: vreg_128 }
+  - { id: 7, class: vreg_128 }
+body: |
+  bb.0:
+    successors: %bb.1
+    %0:vreg_128 = IMPLICIT_DEF
+    %1:vreg_128 = IMPLICIT_DEF
+    %2:vreg_128 = IMPLICIT_DEF
+    %3:vreg_128 = IMPLICIT_DEF
+    %4:vreg_128 = IMPLICIT_DEF
+    %5:vreg_128 = IMPLICIT_DEF
+    %6:vreg_128 = IMPLICIT_DEF
+    %7:vreg_128 = IMPLICIT_DEF
+    ; %0 dies here — frees 0-3
+    S_NOP 0, implicit %0
+    S_BRANCH %bb.1
+
+  bb.1:
+    ; %1-%7 alive = 28 VGPRs. But coloring gave %7→28-31, max=32.
+    ; Splitter should split %7 at %0's death → %7'→0-3. Max→28.
+    S_ENDPGM 0, implicit %1, implicit %2, implicit %3, implicit %4, implicit %5, implicit %6, implicit %7
+...

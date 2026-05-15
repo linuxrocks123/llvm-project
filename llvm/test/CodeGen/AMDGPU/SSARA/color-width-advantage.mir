@@ -29,8 +29,9 @@
 # CHECK-DAG: %0 -> VGPR0_VGPR1_VGPR2_VGPR3
 # CHECK-DAG: %4 -> VGPR4_VGPR5_VGPR6_VGPR7
 # CHECK-DAG: %2 -> VGPR8_VGPR9
-# CHECK-DAG: %3 -> VGPR10
 # CHECK-DAG: %1 -> VGPR8
+# CHECK-DAG: %3 -> VGPR10
+# Max index = 11 = maxRP (width-descending optimal)
 
 --- |
   define amdgpu_kernel void @test_width_advantage() #0 {

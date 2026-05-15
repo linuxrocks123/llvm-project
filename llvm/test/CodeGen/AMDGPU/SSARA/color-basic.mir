@@ -1,10 +1,17 @@
 # RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs -run-pass=amdgpu-ssa-register-allocator \
 # RUN:   -debug-only=amdgpu-ssa-register-allocator -o /dev/null %s 2>&1 | FileCheck %s
 # REQUIRES: asserts
-
+#
 # Basic coloring: 3 VGPR_32 vregs in a straight line.
-# %0 and %1 are live simultaneously, %0 dies before %2 is defined.
-# Expects smallest-first: %0->VGPR0, %1->VGPR1, %2->VGPR0 (reuse after %0 dies)
+#
+# Live ranges:
+#   %0(32) |-----|
+#   %1(32) |-----------|
+#   %2(32)       |-----|
+#          def   kill0  end
+#
+# %0 and %1 live simultaneously. %0 dies, then %2 reuses %0's physreg.
+# Max VGPR index = 2
 
 # CHECK: Coloring order (width descending): 32
 # CHECK: Coloring result:

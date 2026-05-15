@@ -1,0 +1,79 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs -run-pass=amdgpu-ssa-register-allocator \
+# RUN:   -debug-only=amdgpu-ssa-register-allocator -o /dev/null %s 2>&1 | FileCheck %s
+# REQUIRES: asserts
+#
+# Multiple competitors pack into freed sub-tuples.
+#
+# CFG:  bb.0 -> bb.1 -> bb.2
+#
+# Live ranges:
+#   A(%0,128) |-----------|
+#   E(%3,128) |--------------------------|
+#   B(%1,64)                |------------|
+#   C(%2,64)                |------------|
+#              bb.0       bb.1       bb.2
+#
+# A and E interfere (both live in bb.0). A dies in bb.1.
+# B and C are defined in bb.1 AFTER A dies. They interfere with E
+# but NOT with A. B and C don't interfere with each other (both
+# defined at the same point but have non-overlapping uses — or
+# more precisely, both are live simultaneously but need separate regs).
+#
+# Coloring:
+#   Pass 128: A->vgpr0-3, E->vgpr4-7
+#   Pass 64:  B->vgpr8-9, C->vgpr10-11
+#   Max index = 12
+#
+# Splitter:
+#   Split E at A's death -> E'->vgpr0-3 (reuses A's freed slots)
+#   E's original vgpr4-7 freed from A's death onward.
+#   B and C defined after A's death — ranges fit in freed interval.
+#   Recolor B from vgpr8-9 -> vgpr4-5 (sub-tuple of freed 4-7)
+#   Recolor C from vgpr10-11 -> vgpr6-7 (sub-tuple of freed 4-7)
+#   New max index = 8
+
+# CHECK: Coloring result:
+# CHECK-DAG: %0 -> VGPR0_VGPR1_VGPR2_VGPR3
+# CHECK-DAG: %3 -> VGPR4_VGPR5_VGPR6_VGPR7
+
+--- |
+  define amdgpu_kernel void @test_split_multi_comp() #0 {
+  bb0:
+    br label %bb1
+  bb1:
+    br label %bb2
+  bb2:
+    ret void
+  }
+  attributes #0 = { "amdgpu-num-vgpr"="16" "target-cpu"="gfx1200" }
+...
+---
+name:            test_split_multi_comp
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vreg_128 }
+  - { id: 1, class: vreg_64 }
+  - { id: 2, class: vreg_64 }
+  - { id: 3, class: vreg_128 }
+body: |
+  bb.0:
+    successors: %bb.1
+    ; A(128) and E(128) interfere
+    %0:vreg_128 = IMPLICIT_DEF
+    %3:vreg_128 = IMPLICIT_DEF
+    S_BRANCH %bb.1
+
+  bb.1:
+    successors: %bb.2
+    ; A dies here
+    S_NOP 0, implicit %0
+    ; B(64) and C(64) defined AFTER A dies
+    %1:vreg_64 = IMPLICIT_DEF
+    %2:vreg_64 = IMPLICIT_DEF
+    S_BRANCH %bb.2
+
+  bb.2:
+    ; E, B, C alive
+    S_ENDPGM 0, implicit %1, implicit %2, implicit %3
+...

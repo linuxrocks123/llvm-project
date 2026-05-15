@@ -1,0 +1,74 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs -run-pass=amdgpu-ssa-register-allocator \
+# RUN:   -debug-only=amdgpu-ssa-register-allocator -o /dev/null %s 2>&1 | FileCheck %s
+# REQUIRES: asserts
+#
+# Basic split scenario: E(128) split at A's death, B(32) recolored.
+#
+# CFG:  bb.0 -> bb.1 -> bb.2
+#
+# Live ranges:
+#   A(%0,128) |-----------|
+#   E(%2,128) |--------------------------|
+#   B(%1,32)                |------------|
+#              bb.0       bb.1       bb.2
+#
+# A and E interfere (both live in bb.0).
+# A dies in bb.1 (last use). E lives through to bb.2.
+# B is defined in bb.1 AFTER A dies — B does NOT interfere with A.
+# B interferes with E (both live in bb.1-bb.2).
+#
+# Coloring (width-descending):
+#   Pass 128: A->vgpr0-3, E->vgpr4-7
+#   Pass 32:  B->vgpr8 (blocked by both A and E in bb.0..bb.1)
+#   Max index = 9
+#
+# Splitter:
+#   Split E at A's death -> E'->vgpr0-3 (reuses A's freed slots)
+#   E's original vgpr4-7 freed from A's death onward.
+#   B defined after A's death — B's range fits inside freed interval.
+#   Recolor B from vgpr8 -> vgpr4 (E's freed slots)
+#   New max index = 5
+
+# CHECK: Coloring result:
+# CHECK-DAG: %0 -> VGPR0_VGPR1_VGPR2_VGPR3
+# CHECK-DAG: %2 -> VGPR4_VGPR5_VGPR6_VGPR7
+
+--- |
+  define amdgpu_kernel void @test_split_basic() #0 {
+  bb0:
+    br label %bb1
+  bb1:
+    br label %bb2
+  bb2:
+    ret void
+  }
+  attributes #0 = { "amdgpu-num-vgpr"="12" "target-cpu"="gfx1200" }
+...
+---
+name:            test_split_basic
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vreg_128 }
+  - { id: 1, class: vgpr_32 }
+  - { id: 2, class: vreg_128 }
+body: |
+  bb.0:
+    successors: %bb.1
+    ; A(128) and E(128) both defined here, interfere
+    %0:vreg_128 = IMPLICIT_DEF
+    %2:vreg_128 = IMPLICIT_DEF
+    S_BRANCH %bb.1
+
+  bb.1:
+    successors: %bb.2
+    ; A dies here (last use)
+    S_NOP 0, implicit %0
+    ; B defined AFTER A dies — does not interfere with A
+    %1:vgpr_32 = V_MOV_B32_e32 0, implicit $exec
+    S_BRANCH %bb.2
+
+  bb.2:
+    ; E and B alive
+    S_ENDPGM 0, implicit %1, implicit %2
+...

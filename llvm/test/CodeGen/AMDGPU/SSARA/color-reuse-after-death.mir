@@ -1,9 +1,18 @@
 # RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs -run-pass=amdgpu-ssa-register-allocator \
 # RUN:   -debug-only=amdgpu-ssa-register-allocator -o /dev/null %s 2>&1 | FileCheck %s
 # REQUIRES: asserts
-
-# Physreg reuse: %0(128-bit) dies, then %2(64-bit) should reuse vgpr0-1.
-# %1(128-bit) stays alive throughout, occupying vgpr4-7.
+#
+# Physreg reuse: %0(128-bit) dies, then %2(64-bit) reuses vgpr0-1.
+#
+# Live ranges:
+#   %0(128) |-----|
+#   %1(128) |-----------|
+#   %2(64)        |-----|
+#           def  kill0   end
+#
+# %0 dies, %2 reuses vgpr0-1 from dead %0.
+# %1 stays alive, occupying vgpr4-7.
+# Max VGPR index = 8
 
 # CHECK: Coloring order (width descending): 128 64
 # CHECK: Coloring result:

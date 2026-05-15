@@ -1,0 +1,68 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs -run-pass=amdgpu-ssa-register-allocator \
+# RUN:   -debug-only=amdgpu-ssa-register-allocator -o /dev/null %s 2>&1 | FileCheck %s
+# REQUIRES: asserts
+#
+# Competitor B extends past E's end — cannot be recolored into freed slots.
+#
+# CFG:  bb.0 -> bb.1 -> bb.2 -> bb.3
+#
+# Live ranges:
+#   A(%0,128) |-----------|
+#   E(%2,128) |--------------------------|
+#   B(%1,32)  |---------------------------------------|
+#              bb.0       bb.1       bb.2         bb.3
+#
+# A dies in bb.1. E dies in bb.2. B lives through to bb.3.
+# B's range extends past E's end, so B cannot be recolored into E's
+# freed slots (vgpr4-7) — those slots are only free after E dies,
+# but B is still alive and needs a physreg that's valid across its
+# entire range including bb.3 where E's slots may be reused by others.
+#
+# B stays at its original high index.
+
+# CHECK: Coloring result:
+# CHECK-DAG: %0 -> VGPR0_VGPR1_VGPR2_VGPR3
+# CHECK-DAG: %2 -> VGPR4_VGPR5_VGPR6_VGPR7
+
+--- |
+  define amdgpu_kernel void @test_split_extends_past() #0 {
+  bb0:
+    br label %bb1
+  bb1:
+    br label %bb2
+  bb2:
+    br label %bb3
+  bb3:
+    ret void
+  }
+  attributes #0 = { "amdgpu-num-vgpr"="12" "target-cpu"="gfx1200" }
+...
+---
+name:            test_split_extends_past
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vreg_128 }
+  - { id: 1, class: vgpr_32 }
+  - { id: 2, class: vreg_128 }
+body: |
+  bb.0:
+    successors: %bb.1
+    %0:vreg_128 = IMPLICIT_DEF
+    %2:vreg_128 = IMPLICIT_DEF
+    %1:vgpr_32 = V_MOV_B32_e32 0, implicit $exec
+    S_BRANCH %bb.1
+
+  bb.1:
+    successors: %bb.2
+    S_NOP 0, implicit %0
+    S_BRANCH %bb.2
+
+  bb.2:
+    successors: %bb.3
+    S_NOP 0, implicit %2
+    S_BRANCH %bb.3
+
+  bb.3:
+    S_ENDPGM 0, implicit %1
+...
