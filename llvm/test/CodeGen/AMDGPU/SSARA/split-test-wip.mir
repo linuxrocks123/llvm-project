@@ -28,8 +28,10 @@
 # Max = 32. Only 7 survive + %8 = 28+4 = 32. Can't reduce below 28+4.
 # Split %8 at %0's death: %8'→0-3. %8 shortened. Max = 28. Done!
 
-# CHECK: Split for occupancy
-# CHECK: Split %
+# CHECK: Coloring result:
+# CHECK-DAG: %0 -> VGPR0_VGPR1_VGPR2_VGPR3
+# CHECK-DAG: %1 -> VGPR4_VGPR5_VGPR6_VGPR7
+# CHECK-DAG: %7 -> VGPR28_VGPR29_VGPR30_VGPR31
 
 --- |
   define amdgpu_kernel void @split_test() #0 {
