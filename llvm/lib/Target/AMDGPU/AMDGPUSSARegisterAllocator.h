@@ -31,19 +31,27 @@
 
 namespace llvm {
 
+class GCNSubtarget;
+class SIInstrInfo;
 class SIRegisterInfo;
 
 class AMDGPUSSARegisterAllocator : public MachineFunctionPass {
   const SIRegisterInfo *TRI = nullptr;
+  const SIInstrInfo *TII = nullptr;
   MachineRegisterInfo *MRI = nullptr;
   MachineDominatorTree *MDT = nullptr;
   LiveIntervals *LIS = nullptr;
+  const GCNSubtarget *ST = nullptr;
   RegisterClassInfo RegClassInfo;
 
   std::set<unsigned, std::greater<unsigned>> ColoringOrder;
   DenseMap<Register, MCRegister> ColorMap;
   BitVector OccupiedRegUnits;
+  unsigned MaxVGPRIdx = 0;
+  unsigned MaxSGPRIdx = 0;
+  unsigned DynVGPRBlockSize = 0;
 
+  // === Coloring ===
   void classifyVRegs();
   void color();
   void colorByWidth(unsigned Width);
@@ -51,6 +59,18 @@ class AMDGPUSSARegisterAllocator : public MachineFunctionPass {
   void markOccupied(MCRegister PhysReg);
   void markFree(MCRegister PhysReg);
   MCRegister pickFreePhysReg(const TargetRegisterClass *RC);
+
+  // === SSA Destruction + Operand Rewrite ===
+  bool hasCFPseudos(MachineFunction &MF) const;
+  void destroySSAAndRewrite(MachineFunction &MF);
+  void lowerPHIs(MachineFunction &MF);
+  void resolvePermutation(MachineBasicBlock &MBB,
+                          MachineBasicBlock::iterator InsertPt,
+                          SmallVectorImpl<std::pair<MCRegister, MCRegister>> &Copies,
+                          bool IsVGPR);
+  void emitSwap(MachineBasicBlock &MBB, MachineBasicBlock::iterator InsertPt,
+                MCRegister RegA, MCRegister RegB);
+  void rewriteOperands(MachineFunction &MF);
 
 public:
   static char ID;
