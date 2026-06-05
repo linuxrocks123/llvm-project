@@ -149,6 +149,9 @@ void AMDGPUSSARegisterAllocator::colorByWidth(unsigned Width) {
           MaxSGPRIdx = std::max(MaxSGPRIdx, Idx + W);
       }
 
+      if (MI.isPHI())
+        continue;
+
       SlotIndex NextSI = LIS->getInstructionIndex(MI).getRegSlot().getNextSlot();
       for (const MachineOperand &MO : MI.uses()) {
         if (!MO.isReg() || !MO.getReg().isVirtual())
@@ -200,10 +203,9 @@ void AMDGPUSSARegisterAllocator::emitSwap(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator InsertPt,
     MCRegister RegA, MCRegister RegB) {
   const TargetRegisterClass *RC = TRI->getPhysRegBaseClass(RegA);
-  const unsigned DWordBytes = 4;
-  ArrayRef<int16_t> Parts = TRI->getRegSplitParts(RC, DWordBytes);
+  unsigned RegWidth = TRI->getRegSizeInBits(*RC);
 
-  if (Parts.empty()) {
+  if (RegWidth <= 32) {
     if (ST->hasSwap()) {
       BuildMI(MBB, InsertPt, DebugLoc(), TII->get(AMDGPU::V_SWAP_B32), RegA)
           .addDef(RegB)
@@ -223,6 +225,8 @@ void AMDGPUSSARegisterAllocator::emitSwap(
     return;
   }
 
+  const unsigned DWordBytes = 4;
+  ArrayRef<int16_t> Parts = TRI->getRegSplitParts(RC, DWordBytes);
   for (int16_t SubIdx : Parts) {
     MCRegister SubA = TRI->getSubReg(RegA, SubIdx);
     MCRegister SubB = TRI->getSubReg(RegB, SubIdx);
@@ -264,15 +268,13 @@ void AMDGPUSSARegisterAllocator::resolvePermutation(
 
   // Phase 2: all remaining entries form cycles (chains were drained above).
   unsigned &MaxIdx = IsVGPR ? MaxVGPRIdx : MaxSGPRIdx;
+  const MachineFunction &MF = *MBB.getParent();
   unsigned MaxHWLimit = IsVGPR
-      ? ST->getMaxNumVGPRs(1, DynVGPRBlockSize)
-      : ST->getMaxNumSGPRs(1, true);
+      ? ST->getMaxNumVGPRs(MF)
+      : ST->getMaxNumSGPRs(MF);
   unsigned CurrentOcc = IsVGPR
       ? ST->getOccupancyWithNumVGPRs(MaxIdx, DynVGPRBlockSize)
       : ST->getOccupancyWithNumSGPRs(MaxIdx);
-  unsigned ScratchOcc = IsVGPR
-      ? ST->getOccupancyWithNumVGPRs(MaxIdx + 1, DynVGPRBlockSize)
-      : ST->getOccupancyWithNumSGPRs(MaxIdx + 1);
 
   while (!DstToSrc.empty()) {
     // Pick any entry as cycle start — all remaining entries form disjoint
@@ -280,16 +282,24 @@ void AMDGPUSSARegisterAllocator::resolvePermutation(
     MCRegister CycleStart = DstToSrc.begin()->first;
 
     // Tier 1: scratch register if it doesn't reduce occupancy.
-    if (ScratchOcc == CurrentOcc && MaxIdx < MaxHWLimit) {
-      MCRegister Scratch = IsVGPR
+    // Scratch must match the cycle's register width.
+    unsigned CycleWidth =
+        TRI->getRegSizeInBits(*TRI->getPhysRegBaseClass(CycleStart)) / 32;
+    unsigned ScratchOcc = IsVGPR
+        ? ST->getOccupancyWithNumVGPRs(MaxIdx + CycleWidth, DynVGPRBlockSize)
+        : ST->getOccupancyWithNumSGPRs(MaxIdx + CycleWidth);
+
+    if (ScratchOcc == CurrentOcc && MaxIdx + CycleWidth <= MaxHWLimit) {
+      MCRegister ScratchBase = IsVGPR
           ? MCRegister(AMDGPU::VGPR0 + MaxIdx)
           : MCRegister(AMDGPU::SGPR0 + MaxIdx);
-      ++MaxIdx;
+      MCRegister Scratch = (CycleWidth == 1)
+          ? ScratchBase
+          : TRI->getMatchingSuperReg(ScratchBase, AMDGPU::sub0,
+                TRI->getPhysRegBaseClass(CycleStart));
+      MaxIdx += CycleWidth;
 
       CurrentOcc = ScratchOcc;
-      ScratchOcc = IsVGPR
-          ? ST->getOccupancyWithNumVGPRs(MaxIdx + 1, DynVGPRBlockSize)
-          : ST->getOccupancyWithNumSGPRs(MaxIdx + 1);
 
       LLVM_DEBUG(dbgs() << "    cycle via scratch "
                         << TRI->getName(Scratch) << ":\n");

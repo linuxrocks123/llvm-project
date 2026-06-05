@@ -1,0 +1,75 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs \
+# RUN:   -run-pass=amdgpu-ssa-register-allocator -o - %s | FileCheck %s
+# REQUIRES: asserts
+#
+# Diamond CFG with a single PHI. Both sources are on mutually exclusive
+# paths with no live-through interference, so all three vregs get the same
+# physreg (VGPR0). PHI lowering produces only identities — no copies.
+#
+# CFG:
+#   bb.0 → bb.1 (fallthrough), bb.2 (execz)
+#   bb.1 → bb.3
+#   bb.2 → bb.3
+#
+# Live ranges:
+#          bb.0       bb.1       bb.2       bb.3
+#   %0(32)             |————————————————————————|  (bb.1 path)
+#   %1(32)                         |————————————|  (bb.2 path)
+#   %2(32)                                  |——|  (PHI result)
+#
+# Coloring: %0 → VGPR0, %1 → VGPR0, %2 → VGPR0
+# SSA destruction: all identities, no copies emitted.
+
+# CHECK-LABEL: name: test_destruct_identity
+# CHECK: bb.1:
+# CHECK:      $vgpr0 = V_MOV_B32_e32 42
+# CHECK-NEXT: S_BRANCH %bb.3
+# CHECK: bb.2:
+# CHECK:      $vgpr0 = V_MOV_B32_e32 99
+# CHECK-NEXT: S_BRANCH %bb.3
+# CHECK: bb.3:
+# CHECK-NOT: COPY
+# CHECK-NOT: PHI
+# CHECK: S_ENDPGM 0, implicit $vgpr0
+
+--- |
+  define amdgpu_kernel void @test_destruct_identity() #0 {
+  bb0:
+    br i1 undef, label %bb1, label %bb2
+  bb1:
+    br label %bb3
+  bb2:
+    br label %bb3
+  bb3:
+    ret void
+  }
+  attributes #0 = { "target-cpu"="gfx1200" }
+...
+---
+name:            test_destruct_identity
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vgpr_32 }
+  - { id: 1, class: vgpr_32 }
+  - { id: 2, class: vgpr_32 }
+body: |
+  bb.0:
+    successors: %bb.1, %bb.2
+    S_CBRANCH_EXECZ %bb.2, implicit $exec
+    S_BRANCH %bb.1
+
+  bb.1:
+    successors: %bb.3
+    %0:vgpr_32 = V_MOV_B32_e32 42, implicit $exec
+    S_BRANCH %bb.3
+
+  bb.2:
+    successors: %bb.3
+    %1:vgpr_32 = V_MOV_B32_e32 99, implicit $exec
+    S_BRANCH %bb.3
+
+  bb.3:
+    %2:vgpr_32 = PHI %0, %bb.1, %1, %bb.2
+    S_ENDPGM 0, implicit %2
+...

@@ -1,0 +1,42 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs \
+# RUN:   -run-pass=amdgpu-ssa-register-allocator -o - %s | FileCheck %s
+# REQUIRES: asserts
+#
+# Straight-line code with no PHIs. Tests operand rewrite only:
+# all virtual register operands must be replaced with physical registers.
+#
+# Coloring: %0 → VGPR0, %1 → VGPR1, %2 → VGPR0 (reuses after %0 dies)
+
+# CHECK-LABEL: name: test_destruct_rewrite
+# CHECK-NOT: %0
+# CHECK-NOT: %1
+# CHECK-NOT: %2
+# CHECK: $vgpr0 = V_MOV_B32_e32 42
+# CHECK: $vgpr1 = V_MOV_B32_e32 99
+# CHECK: S_NOP 0, implicit $vgpr0
+# CHECK: $vgpr0 = V_MOV_B32_e32 7
+# CHECK: S_ENDPGM 0, implicit $vgpr0, implicit $vgpr1
+
+--- |
+  define amdgpu_kernel void @test_destruct_rewrite() #0 {
+  bb0:
+    ret void
+  }
+  attributes #0 = { "target-cpu"="gfx1200" }
+...
+---
+name:            test_destruct_rewrite
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vgpr_32 }
+  - { id: 1, class: vgpr_32 }
+  - { id: 2, class: vgpr_32 }
+body: |
+  bb.0:
+    %0:vgpr_32 = V_MOV_B32_e32 42, implicit $exec
+    %1:vgpr_32 = V_MOV_B32_e32 99, implicit $exec
+    S_NOP 0, implicit %0
+    %2:vgpr_32 = V_MOV_B32_e32 7, implicit $exec
+    S_ENDPGM 0, implicit %2, implicit %1
+...
