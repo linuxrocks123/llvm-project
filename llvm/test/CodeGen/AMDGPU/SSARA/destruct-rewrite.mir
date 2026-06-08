@@ -2,10 +2,20 @@
 # RUN:   -run-pass=amdgpu-ssa-register-allocator -o - %s | FileCheck %s
 # REQUIRES: asserts
 #
-# Straight-line code with no PHIs. Tests operand rewrite only:
-# all virtual register operands must be replaced with physical registers.
+# Test: Straight-line code, no PHIs — operand rewrite only
 #
-# Coloring: %0 → VGPR0, %1 → VGPR1, %2 → VGPR0 (reuses after %0 dies)
+# CFG:
+#        bb.0 (straight line, no branches)
+#
+# Live ranges:
+#        V_MOV  V_MOV  S_NOP  V_MOV  S_ENDPGM
+#   %0    |======|======|
+#   %1           |======|======|======|======|
+#   %2                         |======|======|
+#
+# Coloring: %0→VGPR0, %1→VGPR1, %2→VGPR0 (reuses after %0 dies)
+#
+# Expected: all vregs replaced with physregs, no copies
 
 # CHECK-LABEL: name: test_destruct_rewrite
 # CHECK-NOT: %0

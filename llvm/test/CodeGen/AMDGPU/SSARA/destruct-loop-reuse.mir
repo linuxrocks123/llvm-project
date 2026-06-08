@@ -1,0 +1,79 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs \
+# RUN:   -run-pass=amdgpu-ssa-register-allocator -o - %s | FileCheck %s
+# REQUIRES: asserts
+#
+# Test: Loop, %x dies at V_ADD — kills-before-defs reuse, no copy
+#
+# CFG:
+#        bb.0 (def %0)          bb.2 (latch)
+#        S_BRANCH bb.1          %2 = V_ADD %1, 1
+#             \                 S_BRANCH bb.1
+#              v                  /
+#           bb.1 (header)  <-----+
+#        %1 = PHI(%0, bb.0, %2, bb.2)
+#        S_CBRANCH_EXECZ bb.3
+#                |
+#                v
+#           bb.3 (exit)
+#
+# Live ranges:
+#          bb.0       bb.1       bb.2
+#   %0(32) |===========|
+#   %1(32)             |==================|
+#   %2(32)                         |======|
+#
+# %1's only use in bb.2 is V_ADD. kills-before-defs frees VGPR0
+# before %2 is colored. %2 reuses VGPR0. Back edge is identity.
+#
+# Coloring: %0→VGPR0, %1→VGPR0, %2→VGPR0
+#
+# Expected: $vgpr0 = V_ADD $vgpr0, 1 — no COPY
+
+# CHECK: bb.2:
+# CHECK:      $vgpr0 = V_ADD_U32_e64 $vgpr0, 1, 0
+# CHECK-NOT: COPY
+# CHECK: S_BRANCH %bb.1
+# CHECK: bb.3:
+# CHECK: S_ENDPGM
+
+--- |
+  define amdgpu_kernel void @test_destruct_loop_reuse() #0 {
+  entry:
+    br label %header
+  header:
+    br i1 undef, label %body, label %exit
+  body:
+    br label %header
+  exit:
+    ret void
+  }
+  attributes #0 = { "target-cpu"="gfx1200" }
+...
+---
+name:            test_destruct_loop_reuse
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vgpr_32 }
+  - { id: 1, class: vgpr_32 }
+  - { id: 2, class: vgpr_32 }
+body: |
+  bb.0:
+    successors: %bb.1
+    %0:vgpr_32 = V_MOV_B32_e32 0, implicit $exec
+    S_BRANCH %bb.1
+
+  bb.1:
+    successors: %bb.2, %bb.3
+    %1:vgpr_32 = PHI %0, %bb.0, %2, %bb.2
+    S_CBRANCH_EXECZ %bb.3, implicit $exec
+    S_BRANCH %bb.2
+
+  bb.2:
+    successors: %bb.1
+    %2:vgpr_32 = V_ADD_U32_e64 %1, 1, 0, implicit $exec
+    S_BRANCH %bb.1
+
+  bb.3:
+    S_ENDPGM 0
+...

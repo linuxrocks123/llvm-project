@@ -108,6 +108,27 @@ void AMDGPUSSARegisterAllocator::colorByWidth(unsigned Width) {
     seedOccupiedAtBBEntry(MBB);
 
     for (MachineInstr &MI : *MBB) {
+      // Kill uses before coloring defs: a def can reuse the physreg of
+      // a source that dies at this instruction (no interference without
+      // early-clobber). PHIs skipped: their sources are live only to
+      // predecessor boundaries, and markFree would clear physregs that
+      // preceding PHI defs already claimed.
+      if (!MI.isPHI()) {
+        SlotIndex NextSI = LIS->getInstructionIndex(MI).getRegSlot().getNextSlot();
+        for (const MachineOperand &MO : MI.uses()) {
+          if (!MO.isReg() || !MO.getReg().isVirtual())
+            continue;
+          auto It = ColorMap.find(MO.getReg());
+          if (It == ColorMap.end())
+            continue;
+          if (!LIS->getInterval(MO.getReg()).liveAt(NextSI)) {
+            markFree(It->second);
+            LLVM_DEBUG(dbgs() << "    kill: " << printReg(MO.getReg(), TRI)
+                              << " free " << TRI->getName(It->second) << "\n");
+          }
+        }
+      }
+
       for (MachineOperand &MO : MI.defs()) {
         Register VReg = MO.getReg();
         if (!VReg.isVirtual())
@@ -147,23 +168,6 @@ void AMDGPUSSARegisterAllocator::colorByWidth(unsigned Width) {
           MaxVGPRIdx = std::max(MaxVGPRIdx, Idx + W);
         else if (TRI->isSGPRClass(RC))
           MaxSGPRIdx = std::max(MaxSGPRIdx, Idx + W);
-      }
-
-      if (MI.isPHI())
-        continue;
-
-      SlotIndex NextSI = LIS->getInstructionIndex(MI).getRegSlot().getNextSlot();
-      for (const MachineOperand &MO : MI.uses()) {
-        if (!MO.isReg() || !MO.getReg().isVirtual())
-          continue;
-        auto It = ColorMap.find(MO.getReg());
-        if (It == ColorMap.end())
-          continue;
-        if (!LIS->getInterval(MO.getReg()).liveAt(NextSI)) {
-          markFree(It->second);
-          LLVM_DEBUG(dbgs() << "    kill: " << printReg(MO.getReg(), TRI)
-                            << " free " << TRI->getName(It->second) << "\n");
-        }
       }
     }
   }

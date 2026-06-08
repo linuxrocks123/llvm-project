@@ -2,23 +2,30 @@
 # RUN:   -run-pass=amdgpu-ssa-register-allocator -o - %s | FileCheck %s
 # REQUIRES: asserts
 #
-# Diamond CFG with a single PHI. Both sources are on mutually exclusive
-# paths with no live-through interference, so all three vregs get the same
-# physreg (VGPR0). PHI lowering produces only identities — no copies.
+# Test: Diamond CFG, all PHI copies are identities — no copies emitted
 #
 # CFG:
-#   bb.0 → bb.1 (fallthrough), bb.2 (execz)
-#   bb.1 → bb.3
-#   bb.2 → bb.3
+#           bb.0
+#           /    \
+#          v   (execz)
+#        bb.1      bb.2
+#     (def %0)  (def %1)
+#          \      /
+#           v    v
+#           bb.3
+#        %2 = PHI(%0, bb.1, %1, bb.2)
+#        S_ENDPGM implicit %2
 #
 # Live ranges:
 #          bb.0       bb.1       bb.2       bb.3
-#   %0(32)             |————————————————————————|  (bb.1 path)
-#   %1(32)                         |————————————|  (bb.2 path)
-#   %2(32)                                  |——|  (PHI result)
+#   %0(32)             |============================|  (bb.1 path)
+#   %1(32)                         |================|  (bb.2 path)
+#   %2(32)                                     |====|  (PHI result)
 #
-# Coloring: %0 → VGPR0, %1 → VGPR0, %2 → VGPR0
-# SSA destruction: all identities, no copies emitted.
+# No interference: %0 and %1 on mutually exclusive paths.
+# Coloring: %0→VGPR0, %1→VGPR0, %2→VGPR0
+#
+# Expected: all identities, no copies, PHI erased
 
 # CHECK-LABEL: name: test_destruct_identity
 # CHECK: bb.1:

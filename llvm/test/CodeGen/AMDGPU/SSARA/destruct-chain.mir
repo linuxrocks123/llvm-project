@@ -1,0 +1,102 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs \
+# RUN:   -run-pass=amdgpu-ssa-register-allocator -o - %s | FileCheck %s
+# REQUIRES: asserts
+#
+# Test: Loop with 3 PHIs, chain of length 3 on back edge
+#
+# CFG:
+#        bb.0 (def %0,%1,%2)        bb.2 (latch)
+#        S_BRANCH bb.1              %6 = V_ADD %3, 1
+#             \                     S_NOP %5, S_NOP %3
+#              v                    %7 = V_ADD %4, 1
+#           bb.1 (header)  <---     %8 = V_ADD %6, 1
+#        %3 = PHI(%0,%6)      |    S_BRANCH bb.1
+#        %4 = PHI(%1,%7)      +-------/
+#        %5 = PHI(%2,%8)
+#        S_CBRANCH_EXECZ bb.3
+#                |
+#                v
+#           bb.3 (exit)
+#
+# Live ranges in bb.2:
+#        V_ADD  NOP   NOP  V_ADD  V_ADD
+#   %3    |======|======|
+#   %4    |======|======|======|
+#   %5    |======|
+#   %6           |======|======|======|======|
+#   %7                                |======|
+#   %8                                       |
+#
+# Coloring: %3→VGPR0, %4→VGPR1, %5→VGPR2
+#           %6→VGPR3 (%3 alive), %7→VGPR0 (%4 died), %8→VGPR1 (%6 died)
+#
+# Back-edge copies: VGPR3→VGPR0, VGPR0→VGPR1, VGPR1→VGPR2
+# Chain: VGPR3→VGPR0→VGPR1→VGPR2
+# Worklist emits tail-to-head: V1→V2, V0→V1, V3→V0
+
+# CHECK: bb.2:
+# CHECK:      $vgpr3 = V_ADD_U32_e64 $vgpr0, 1, 0
+# CHECK-NEXT: S_NOP 0, implicit $vgpr2
+# CHECK-NEXT: S_NOP 0, implicit $vgpr0
+# CHECK-NEXT: $vgpr0 = V_ADD_U32_e64 $vgpr1, 1, 0
+# CHECK-NEXT: $vgpr1 = V_ADD_U32_e64 $vgpr3, 1, 0
+# CHECK-NEXT: $vgpr2 = COPY $vgpr1
+# CHECK-NEXT: $vgpr1 = COPY $vgpr0
+# CHECK-NEXT: $vgpr0 = COPY $vgpr3
+# CHECK-NEXT: S_BRANCH %bb.1
+
+--- |
+  define amdgpu_kernel void @test_destruct_chain() #0 {
+  entry:
+    br label %header
+  header:
+    br i1 undef, label %body, label %exit
+  body:
+    br label %header
+  exit:
+    ret void
+  }
+  attributes #0 = { "target-cpu"="gfx1200" }
+...
+---
+name:            test_destruct_chain
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vgpr_32 }
+  - { id: 1, class: vgpr_32 }
+  - { id: 2, class: vgpr_32 }
+  - { id: 3, class: vgpr_32 }
+  - { id: 4, class: vgpr_32 }
+  - { id: 5, class: vgpr_32 }
+  - { id: 6, class: vgpr_32 }
+  - { id: 7, class: vgpr_32 }
+  - { id: 8, class: vgpr_32 }
+body: |
+  bb.0:
+    successors: %bb.1
+    %0:vgpr_32 = V_MOV_B32_e32 0, implicit $exec
+    %1:vgpr_32 = V_MOV_B32_e32 1, implicit $exec
+    %2:vgpr_32 = V_MOV_B32_e32 2, implicit $exec
+    S_BRANCH %bb.1
+
+  bb.1:
+    successors: %bb.2, %bb.3
+    %3:vgpr_32 = PHI %0, %bb.0, %6, %bb.2
+    %4:vgpr_32 = PHI %1, %bb.0, %7, %bb.2
+    %5:vgpr_32 = PHI %2, %bb.0, %8, %bb.2
+    S_CBRANCH_EXECZ %bb.3, implicit $exec
+    S_BRANCH %bb.2
+
+  bb.2:
+    successors: %bb.1
+    %6:vgpr_32 = V_ADD_U32_e64 %3, 1, 0, implicit $exec
+    S_NOP 0, implicit %5
+    S_NOP 0, implicit %3
+    %7:vgpr_32 = V_ADD_U32_e64 %4, 1, 0, implicit $exec
+    %8:vgpr_32 = V_ADD_U32_e64 %6, 1, 0, implicit $exec
+    S_BRANCH %bb.1
+
+  bb.3:
+    S_ENDPGM 0
+...

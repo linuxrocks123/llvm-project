@@ -6,12 +6,36 @@
 # RUN:   | FileCheck %s --check-prefix=XOR
 # REQUIRES: asserts
 #
-# 128-bit PHI swap with amdgpu-num-vgpr=8 to reject scratch tier.
-# Exercises per-subreg V_SWAP_B32 (gfx900, GFX9+) and XOR triplet (fiji, GFX8).
+# Test: 128-bit PHI swap, per-subreg V_SWAP_B32 (gfx900) and XOR (fiji)
+#       amdgpu-num-vgpr=8 rejects scratch tier, forces Tier 2/3.
 #
-# CFG: bb.0 → bb.1/bb.2 → bb.3
-# %0(128) and %1(128) defined in bb.0, cross-referenced by two PHIs in bb.3.
-# From bb.1: identities. From bb.2: VGPR0-3 ↔ VGPR4-7 swap.
+# CFG:
+#           bb.0 (def %0:128, %1:128)
+#           /    \
+#          v   (execz)
+#        bb.1      bb.2
+#       (empty)  (empty)
+#          \      /
+#           v    v
+#           bb.3
+#        %2 = PHI(%0, bb.1, %1, bb.2)
+#        %3 = PHI(%1, bb.1, %0, bb.2)
+#        S_ENDPGM implicit %2, %3
+#
+# Live ranges:
+#          bb.0                  bb.3
+#   %0(128) |========================|
+#   %1(128) |========================|
+#   %2(128)                     |====|
+#   %3(128)                     |====|
+#
+# Coloring: %0→VGPR0-3, %1→VGPR4-7, %2→VGPR0-3, %3→VGPR4-7
+#
+# Expected:
+#   bb.1: identities
+#   bb.2: VGPR0-3 ↔ VGPR4-7 swap
+#     gfx900: 4x V_SWAP_B32 (per subreg pair)
+#     fiji:   4x XOR triplet (12 V_XOR_B32_e64)
 
 # SWAP: bb.2:
 # SWAP:      $vgpr0, $vgpr4 = V_SWAP_B32 $vgpr4, $vgpr0

@@ -2,28 +2,31 @@
 # RUN:   -run-pass=amdgpu-ssa-register-allocator -o - %s | FileCheck %s
 # REQUIRES: asserts
 #
-# Diamond CFG with a live-through value forcing a COPY on one PHI edge.
+# Test: Diamond CFG, live-through value forces COPY on one PHI edge
 #
 # CFG:
-#   bb.0 → bb.1 (fallthrough)
-#   bb.0 → bb.2 (execz)
-#   bb.1 → bb.3
-#   bb.2 → bb.3
+#           bb.0 (def %a)
+#           /    \
+#          v   (execz)
+#        bb.1      bb.2
+#     (def %b)   (empty)
+#          \      /
+#           v    v
+#           bb.3
+#        %c = PHI(%b, bb.1, %a, bb.2)
+#        S_ENDPGM implicit %a, %c
 #
 # Live ranges:
 #          bb.0       bb.1       bb.2       bb.3
-#   %a(32) |——————————————————————————————————|
-#   %b(32)             |——————————————————————|  (bb.1 path only)
-#   %c(32)                                |——|  (PHI result)
+#   %a(32) |============================================|
+#   %b(32)             |============================|  (bb.1 path)
+#   %c(32)                                     |====|  (PHI result)
 #
-# Coloring:
-#   %a → VGPR0 (live everywhere)
-#   %b → VGPR1 (interferes with %a in bb.1)
-#   %c → VGPR1 (PHI result, %a still live past PHI)
+# Coloring: %a→VGPR0, %b→VGPR1, %c→VGPR1
 #
-# SSA destruction:
+# Expected:
 #   bb.1 edge: %b(VGPR1) → %c(VGPR1) = identity, no copy
-#   bb.2 edge: %a(VGPR0) → %c(VGPR1) = COPY inserted
+#   bb.2 edge: %a(VGPR0) → %c(VGPR1) = COPY $vgpr1, $vgpr0
 
 # CHECK-LABEL: name: test_destruct_simple_copy
 # CHECK: bb.1:
