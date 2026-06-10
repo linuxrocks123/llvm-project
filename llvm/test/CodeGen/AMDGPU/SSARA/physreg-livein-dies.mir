@@ -1,0 +1,52 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs \
+# RUN:   -run-pass=amdgpu-ssa-register-allocator -o - %s | FileCheck %s
+# REQUIRES: asserts
+#
+# Test: Physreg live-in dies mid-block — vreg reuses freed physreg
+#
+# CFG:
+#        bb.0
+#     liveins: $vgpr0
+#     %0 = V_MOV 42            ; must avoid VGPR0
+#     S_NOP implicit $vgpr0    ; $vgpr0 dies
+#     %1 = V_MOV 99            ; can reuse VGPR0
+#     S_ENDPGM implicit %0, %1
+#
+# Live ranges:
+#         V_MOV   S_NOP   V_MOV   S_ENDPGM
+#  $vgpr0 |========|
+#  %0      |========|========|========|
+#  %1                       |========|
+#
+# Coloring: %0→VGPR1 (VGPR0 busy), %1→VGPR0 (freed after S_NOP)
+#
+# Expected: %1 reuses VGPR0 after $vgpr0 dies
+
+# CHECK: bb.0:
+# CHECK:      $vgpr1 = V_MOV_B32_e32 42
+# CHECK-NEXT: S_NOP 0, implicit $vgpr0
+# CHECK-NEXT: $vgpr0 = V_MOV_B32_e32 99
+# CHECK-NEXT: S_ENDPGM 0, implicit $vgpr1, implicit $vgpr0
+
+--- |
+  define amdgpu_kernel void @test_physreg_livein_dies() #0 {
+  entry:
+    ret void
+  }
+  attributes #0 = { "target-cpu"="gfx1200" }
+...
+---
+name:            test_physreg_livein_dies
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vgpr_32 }
+  - { id: 1, class: vgpr_32 }
+body: |
+  bb.0:
+    liveins: $vgpr0
+    %0:vgpr_32 = V_MOV_B32_e32 42, implicit $exec
+    S_NOP 0, implicit $vgpr0
+    %1:vgpr_32 = V_MOV_B32_e32 99, implicit $exec
+    S_ENDPGM 0, implicit %0, implicit %1
+...

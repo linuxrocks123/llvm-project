@@ -116,29 +116,38 @@ void AMDGPUSSARegisterAllocator::colorByWidth(unsigned Width) {
       if (!MI.isPHI()) {
         SlotIndex NextSI = LIS->getInstructionIndex(MI).getRegSlot().getNextSlot();
         for (const MachineOperand &MO : MI.uses()) {
-          if (!MO.isReg() || !MO.getReg().isVirtual())
+          if (!MO.isReg())
             continue;
-          auto It = ColorMap.find(MO.getReg());
+          Register Reg = MO.getReg();
+          if (Reg.isPhysical()) {
+            for (MCRegUnit Unit : TRI->regunits(Reg))
+              if (!LIS->getRegUnit(Unit).liveAt(NextSI))
+                OccupiedRegUnits.reset(Unit);
+            continue;
+          }
+          auto It = ColorMap.find(Reg);
           if (It == ColorMap.end())
             continue;
-          if (!LIS->getInterval(MO.getReg()).liveAt(NextSI)) {
+          if (!LIS->getInterval(Reg).liveAt(NextSI)) {
             markFree(It->second);
-            LLVM_DEBUG(dbgs() << "    kill: " << printReg(MO.getReg(), TRI)
+            LLVM_DEBUG(dbgs() << "    kill: " << printReg(Reg, TRI)
                               << " free " << TRI->getName(It->second) << "\n");
           }
         }
       }
 
       for (MachineOperand &MO : MI.defs()) {
-        Register VReg = MO.getReg();
-        if (!VReg.isVirtual())
+        Register Reg = MO.getReg();
+        if (!Reg.isVirtual()) {
+          markOccupied(Reg);
           continue;
+        }
 
-        if (TRI->getRegSizeInBits(*MRI->getRegClass(VReg)) != Width) {
-          if (auto It = ColorMap.find(VReg); It != ColorMap.end()) {
+        if (TRI->getRegSizeInBits(*MRI->getRegClass(Reg)) != Width) {
+          if (auto It = ColorMap.find(Reg); It != ColorMap.end()) {
             markOccupied(It->second);
             LLVM_DEBUG(dbgs() << "    mark wider def: "
-                              << printReg(VReg, TRI) << " -> "
+                              << printReg(Reg, TRI) << " -> "
                               << TRI->getName(It->second) << "\n");
           }
           continue;
@@ -149,19 +158,19 @@ void AMDGPUSSARegisterAllocator::colorByWidth(unsigned Width) {
         if (MI.isRegTiedToUseOperand(MO.getOperandNo(), &UseOpIdx)) {
           Chosen = ColorMap.lookup(MI.getOperand(UseOpIdx).getReg());
           assert(Chosen && "Tied use must be colored already");
-          LLVM_DEBUG(dbgs() << "    tied: " << printReg(VReg, TRI)
+          LLVM_DEBUG(dbgs() << "    tied: " << printReg(Reg, TRI)
                             << " inherits " << TRI->getName(Chosen) << "\n");
         } else {
-          Chosen = pickFreePhysReg(MRI->getRegClass(VReg));
+          Chosen = pickFreePhysReg(MRI->getRegClass(Reg));
           assert(Chosen && "Failed to find free physreg");
-          LLVM_DEBUG(dbgs() << "    color: " << printReg(VReg, TRI)
+          LLVM_DEBUG(dbgs() << "    color: " << printReg(Reg, TRI)
                             << " -> " << TRI->getName(Chosen) << "\n");
         }
 
-        ColorMap[VReg] = Chosen;
+        ColorMap[Reg] = Chosen;
         markOccupied(Chosen);
 
-        const TargetRegisterClass *RC = MRI->getRegClass(VReg);
+        const TargetRegisterClass *RC = MRI->getRegClass(Reg);
         unsigned Idx = TRI->getHWRegIndex(Chosen);
         unsigned W = TRI->getRegSizeInBits(*RC) / 32;
         if (TRI->isVGPRClass(RC))

@@ -1,0 +1,52 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs \
+# RUN:   -run-pass=amdgpu-ssa-register-allocator -o - %s | FileCheck %s
+# REQUIRES: asserts
+#
+# Test: Physreg defined mid-block — vreg must avoid it
+#
+# CFG:
+#        bb.0
+#     %0 = V_MOV 42               ; VGPR0 (free, first alloc)
+#     $vgpr0 = V_MOV 77           ; physreg def: VGPR0 now busy
+#     %1 = V_MOV 99               ; must avoid VGPR0
+#     S_ENDPGM implicit $vgpr0, %1
+#
+# Live ranges:
+#         V_MOV   V_MOV    V_MOV   S_ENDPGM
+#  %0      |========|
+#  $vgpr0          |=========|========|
+#  %1                        |========|
+#
+# Coloring: %0→VGPR0, %1→VGPR1 (VGPR0 busy from physreg def)
+#
+# Expected: %1 avoids VGPR0
+
+# CHECK: bb.0:
+# CHECK:      $vgpr0 = V_MOV_B32_e32 42
+# CHECK-NEXT: S_NOP 0, implicit $vgpr0
+# CHECK-NEXT: $vgpr0 = V_MOV_B32_e32 77
+# CHECK-NEXT: $vgpr1 = V_MOV_B32_e32 99
+# CHECK-NEXT: S_ENDPGM 0, implicit $vgpr0, implicit $vgpr1
+
+--- |
+  define amdgpu_kernel void @test_physreg_def_midblock() #0 {
+  entry:
+    ret void
+  }
+  attributes #0 = { "target-cpu"="gfx1200" }
+...
+---
+name:            test_physreg_def_midblock
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vgpr_32 }
+  - { id: 1, class: vgpr_32 }
+body: |
+  bb.0:
+    %0:vgpr_32 = V_MOV_B32_e32 42, implicit $exec
+    S_NOP 0, implicit %0
+    $vgpr0 = V_MOV_B32_e32 77, implicit $exec
+    %1:vgpr_32 = V_MOV_B32_e32 99, implicit $exec
+    S_ENDPGM 0, implicit $vgpr0, implicit %1
+...
