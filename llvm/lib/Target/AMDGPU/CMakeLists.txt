@@ -189,6 +189,7 @@ add_llvm_target(AMDGPUCodeGen
   AMDGPUNextUseAnalysis.cpp
   AMDGPUSSARegisterSpiller.cpp
   AMDGPUSSARegisterAllocator.cpp
+  AMDGPURebuildSSA.cpp
 
   LINK_COMPONENTS
   AMDGPUDesc

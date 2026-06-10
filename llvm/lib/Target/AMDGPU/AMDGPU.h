@@ -104,6 +104,10 @@ MachineFunctionPass *createAMDGPUSSARegisterSpillerPass();
 void initializeAMDGPUSSARegisterSpillerPass(PassRegistry &);
 extern char &AMDGPUSSARegisterSpillerID;
 
+FunctionPass *createAMDGPURebuildSSALegacyPass();
+void initializeAMDGPURebuildSSALegacyPass(PassRegistry &);
+extern char &AMDGPURebuildSSALegacyID;
+
 MachineFunctionPass *createAMDGPUSSARegisterAllocatorPass();
 void initializeAMDGPUSSARegisterAllocatorPass(PassRegistry &);
 extern char &AMDGPUSSARegisterAllocatorID;
