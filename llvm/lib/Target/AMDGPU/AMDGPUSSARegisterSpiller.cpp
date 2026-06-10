@@ -268,6 +268,17 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
     if (MBB->empty())
       continue;
 
+    // Seed physreg pressure from block live-ins.
+    // GCNRegPressure only tracks virtual registers; physical registers
+    // reduce the available budget and must be counted separately.
+    unsigned LivePhysRP = 0;
+    for (const auto &LI : MBB->liveins()) {
+      const TargetRegisterClass *RC = TRI->getPhysRegBaseClass(LI.PhysReg);
+      if (RC && !MRI->isReserved(LI.PhysReg)
+          && (IsVGPRPass ? TRI->isVGPRClass(RC) : TRI->isSGPRClass(RC)))
+        LivePhysRP += TRI->getRegSizeInBits(*RC) / 32;
+    }
+
     // Traverse instructions forward (from beginning to end)
     // When we spill at point P, pressure drops from P forward
     //
@@ -288,6 +299,45 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
 
       LLVM_DEBUG(dbgs() << "  Processing: " << MI);
 
+      // Update physreg pressure on the fly: kills before defs.
+      // Pressure is counted in 32-bit register slots. For wide physregs,
+      // each 32-bit sub-register is checked independently (partial kills).
+      // Reserved registers (EXEC, M0, etc.) are skipped — they have no
+      // LiveRange in LiveIntervals and are excluded from allocation.
+      SlotIndex NextSI = LIS->getInstructionIndex(MI).getRegSlot().getNextSlot();
+      unsigned PhysDefs = 0;
+      for (const MachineOperand &MO : MI.operands()) {
+        if (!MO.isReg() || !MO.getReg().isPhysical())
+          continue;
+        Register Reg = MO.getReg();
+        const TargetRegisterClass *RC = TRI->getPhysRegBaseClass(Reg);
+        if (!RC || MRI->isReserved(Reg)
+            || !(IsVGPRPass ? TRI->isVGPRClass(RC)
+                            : TRI->isSGPRClass(RC)))
+          continue;
+        unsigned Width = TRI->getRegSizeInBits(*RC) / 32;
+        if (MO.isUse()) {
+          if (Width == 1) {
+            bool Dead = true;
+            for (MCRegUnit Unit : TRI->regunits(Reg))
+              if (LIS->getRegUnit(Unit).liveAt(NextSI)) { Dead = false; break; }
+            if (Dead) --LivePhysRP;
+          } else {
+            const unsigned DWordBytes = 4;
+            for (int16_t SubIdx : TRI->getRegSplitParts(RC, DWordBytes)) {
+              MCRegister Sub = TRI->getSubReg(Reg, SubIdx);
+              bool Dead = true;
+              for (MCRegUnit Unit : TRI->regunits(Sub))
+                if (LIS->getRegUnit(Unit).liveAt(NextSI)) { Dead = false; break; }
+              if (Dead) --LivePhysRP;
+            }
+          }
+        }
+        if (MO.isDef())
+          PhysDefs += Width;
+      }
+      LivePhysRP += PhysDefs;
+
       // Reset tracker to this instruction - it will compute what's live here
       // by analyzing backward from this point
       RPTracker->reset(MI);
@@ -299,6 +349,7 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
       const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
       unsigned CurRP = IsVGPRPass ? CurPressure.getVGPRNum(ST.hasGFX90AInsts())
                                   : CurPressure.getSGPRNum();
+      CurRP += LivePhysRP;
 
       LLVM_DEBUG(dbgs() << "    " << (IsVGPRPass ? "VGPR" : "SGPR")
                         << " pressure: " << CurRP << "\n");
