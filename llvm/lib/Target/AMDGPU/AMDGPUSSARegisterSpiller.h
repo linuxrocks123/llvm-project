@@ -383,6 +383,14 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   adjustReloadForLoop(MachineBasicBlock *ReloadBB, MachineInstr *InsertBeforeMI,
                       MachineBasicBlock *KillBB, Register SpilledReg);
 
+  /// Accounting only: compute how many VGPRs SGPR-spill-to-lane will consume,
+  /// so Pass 2 (VGPR) sees the correct budget. Does NOT lower the pseudos and
+  /// does NOT reserve physregs — physical lane reservation and the actual
+  /// writelane/readlane materialization happen later, at SGPR coloring time
+  /// (SuperReg must be physical for SGPRSpillBuilder).
+  /// Called between Pass 1 (SGPR) and Pass 2 (VGPR).
+  unsigned countSGPRSpillVGPRs(MachineFunction &MF);
+
 public:
   static char ID;
 

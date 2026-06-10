@@ -311,7 +311,7 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
           continue;
         Register Reg = MO.getReg();
         const TargetRegisterClass *RC = TRI->getPhysRegBaseClass(Reg);
-        if (!RC || MRI->isReserved(Reg)
+        if (!RC || MRI->isReserved(Reg) || !RC->isAllocatable()
             || !(IsVGPRPass ? TRI->isVGPRClass(RC)
                             : TRI->isSGPRClass(RC)))
           continue;
@@ -2452,6 +2452,44 @@ void AMDGPUSSARegisterSpiller::cutFromLiveRange(LiveRange &LR, SlotIndex CutStar
   }
 }
 
+unsigned AMDGPUSSARegisterSpiller::countSGPRSpillVGPRs(MachineFunction &MF) {
+  SIMachineFunctionInfo *FuncInfo = MF.getInfo<SIMachineFunctionInfo>();
+  if (!FuncInfo->hasSpilledSGPRs())
+    return 0;
+
+  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
+  MachineFrameInfo &MFI_Local = MF.getFrameInfo();
+  const unsigned WaveSize = ST.getWavefrontSize();
+
+  // Lane VGPRs are packed WaveSize 32-bit slots per VGPR, accumulated across
+  // all distinct SGPR-spill frame indices (same packing as
+  // allocateSGPRSpillToVGPRLane). Count slots from frame-object sizes only —
+  // no physreg, no SuperReg, no side effects.
+  DenseSet<int> SeenFIs;
+  unsigned TotalLanes = 0;
+  for (MachineBasicBlock &MBB : MF) {
+    for (MachineInstr &MI : MBB) {
+      if (!TII->isSGPRSpill(MI))
+        continue;
+      const MachineOperand *Addr =
+          TII->getNamedOperand(MI, AMDGPU::OpName::addr);
+      if (!Addr || !Addr->isFI())
+        continue;
+      int FI = Addr->getIndex();
+      if (MFI_Local.getStackID(FI) != TargetStackID::SGPRSpill)
+        continue;
+      if (!SeenFIs.insert(FI).second)
+        continue;
+      TotalLanes += MFI_Local.getObjectSize(FI) / 4;
+    }
+  }
+
+  unsigned NumSpillVGPRs = (TotalLanes + WaveSize - 1) / WaveSize;
+  LLVM_DEBUG(dbgs() << "countSGPRSpillVGPRs(): " << TotalLanes
+                    << " lane slot(s) -> " << NumSpillVGPRs << " VGPR(s)\n");
+  return NumSpillVGPRs;
+}
+
 bool AMDGPUSSARegisterSpiller::runOnMachineFunction(MachineFunction &MF) {
   // Initialize pass dependencies
   TRI = static_cast<const SIRegisterInfo *>(MF.getSubtarget().getRegisterInfo());
@@ -2508,6 +2546,14 @@ bool AMDGPUSSARegisterSpiller::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG(dbgs() << "\n=== Pass 1: Processing SGPRs ===\n");
   IsVGPRPass = false;
   bool ChangedSGPR = processFunction(MF, SGPRLimit);
+
+  // Account for VGPRs consumed by SGPR-spill-to-lane and shrink the VGPR
+  // budget for Pass 2. Actual lowering happens later (at SGPR coloring).
+  unsigned SpillVGPRsUsed = 0;
+  if (ChangedSGPR)
+    SpillVGPRsUsed = countSGPRSpillVGPRs(MF);
+  assert(SpillVGPRsUsed <= VGPRLimit && "SGPR spill lanes exceed VGPR budget");
+  VGPRLimit -= SpillVGPRsUsed;
 
   // Pass 2: VGPR Spilling
   LLVM_DEBUG(dbgs() << "\n=== Pass 2: Processing VGPRs ===\n");
