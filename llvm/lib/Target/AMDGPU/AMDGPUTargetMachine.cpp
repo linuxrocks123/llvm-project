@@ -237,6 +237,10 @@ static cl::opt<WWMRegisterRegAlloc::FunctionPassCtor, false,
                 cl::init(&useDefaultRegisterAllocator),
                 cl::desc("Register allocator to use for WWM registers"));
 
+static cl::opt<bool> EnableSSARegAlloc(
+    "amdgpu-ssa-regalloc", cl::Hidden, cl::init(false),
+    cl::desc("Use SSA-based register allocator (experimental)"));
+
 static void initializeDefaultSGPRRegisterAllocatorOnce() {
   RegisterRegAlloc::FunctionPassCtor Ctor = SGPRRegisterRegAlloc::getDefault();
 
@@ -1708,6 +1712,13 @@ bool GCNPassConfig::addRegAssignAndRewriteFast() {
 bool GCNPassConfig::addRegAssignAndRewriteOptimized() {
   if (!usingDefaultRegAlloc())
     reportFatalUsageError(RegAllocOptNotSupportedMessage);
+
+  if (EnableSSARegAlloc) {
+    addPass(createAMDGPURebuildSSALegacyPass());
+    addPass(createAMDGPUSSARegisterSpillerPass());
+    addPass(createAMDGPUSSARegisterAllocatorPass());
+    return true;
+  }
 
   addPass(&GCNPreRALongBranchRegID);
 

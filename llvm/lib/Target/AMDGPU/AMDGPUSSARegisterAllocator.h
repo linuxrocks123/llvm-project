@@ -71,6 +71,8 @@ class AMDGPUSSARegisterAllocator : public MachineFunctionPass {
   void emitSwap(MachineBasicBlock &MBB, MachineBasicBlock::iterator InsertPt,
                 MCRegister RegA, MCRegister RegB);
   void rewriteOperands(MachineFunction &MF);
+  void eliminateRegSequences(MachineFunction &MF);
+  void finalizeProperties(MachineFunction &MF);
 
 public:
   static char ID;

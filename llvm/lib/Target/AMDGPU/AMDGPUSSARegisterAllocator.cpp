@@ -451,6 +451,57 @@ void AMDGPUSSARegisterAllocator::rewriteOperands(MachineFunction &MF) {
   }
 }
 
+// Set all MachineFunction properties that downstream passes require after
+// SSA destruction and physical register assignment are complete.
+// Mirrors the state produced by VirtRegRewriter in the greedy RA path:
+//   NoPHIs     — all PHI instructions removed by lowerPHIs()
+//   NoVRegs    — all virtual registers replaced with physregs by rewriteOperands()
+//   IsSSA      — cleared by leaveSSA() (not SSA anymore)
+// TracksLiveness is deliberately preserved: MBB live-in sets contain only
+// physregs and remain valid after the rewrite; clearing it would break
+// post-RA passes such as MachineLICM that call livein_begin().
+void AMDGPUSSARegisterAllocator::finalizeProperties(MachineFunction &MF) {
+  MRI->leaveSSA();
+  MF.getProperties().set(MachineFunctionProperties::Property::NoPHIs);
+  MF.getProperties().set(MachineFunctionProperties::Property::NoVRegs);
+}
+
+// Eliminate REG_SEQUENCE instructions after physreg assignment.
+// In the greedy RA path, VirtRegRewriter handles this. We skip VirtRegRewriter,
+// so REG_SEQUENCEs that survived into post-RA MIR must be lowered here.
+//
+// A REG_SEQUENCE:  dst = REG_SEQUENCE src0, sub0, src1, sub1, ...
+// is "trivial" if for every (src_i, sub_i): src_i == TRI->getSubReg(dst, sub_i).
+// Trivial ones are deleted. Non-trivial ones are lowered to COPY instructions
+// placed immediately before the REG_SEQUENCE, then the REG_SEQUENCE is deleted.
+void AMDGPUSSARegisterAllocator::eliminateRegSequences(MachineFunction &MF) {
+  for (MachineBasicBlock &MBB : MF) {
+    for (MachineInstr &MI : llvm::make_early_inc_range(MBB)) {
+      if (!MI.isRegSequence())
+        continue;
+
+      MCRegister Dst = MI.getOperand(0).getReg().asMCReg();
+      LLVM_DEBUG(dbgs() << "  [RegSeq] lowering " << MI);
+
+      // Operands: dst, (src, subreg)...
+      for (unsigned I = 1, E = MI.getNumOperands(); I < E; I += 2) {
+        MCRegister Src = MI.getOperand(I).getReg().asMCReg();
+        unsigned SubIdx = MI.getOperand(I + 1).getImm();
+        MCRegister Expected = TRI->getSubReg(Dst, SubIdx);
+        if (Src == Expected)
+          continue;
+        // Non-trivial: emit COPY Expected = Src before the REG_SEQUENCE.
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(TargetOpcode::COPY),
+                Expected)
+            .addReg(Src);
+        LLVM_DEBUG(dbgs() << "      copy: " << TRI->getName(Src) << " -> "
+                          << TRI->getName(Expected) << "\n");
+      }
+      MI.eraseFromParent();
+    }
+  }
+}
+
 void AMDGPUSSARegisterAllocator::destroySSAAndRewrite(MachineFunction &MF) {
   if (hasCFPseudos(MF)) {
     LLVM_DEBUG(dbgs() << "SSA Destruction: skipped — "
@@ -460,9 +511,8 @@ void AMDGPUSSARegisterAllocator::destroySSAAndRewrite(MachineFunction &MF) {
 
   lowerPHIs(MF);
   rewriteOperands(MF);
-
-  MRI->leaveSSA();
-  MRI->invalidateLiveness();
+  eliminateRegSequences(MF);
+  finalizeProperties(MF);
 }
 
 // === Main entry point ===
