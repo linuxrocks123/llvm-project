@@ -1695,12 +1695,14 @@ void SIInstrInfo::storeRegToStackSlot(
 
     // The SGPR spill/restore instructions only work on number sgprs, so we need
     // to make sure we are using the correct register class.
-    if (SrcReg.isVirtual() && SpillSize == 4) {
+    // Only constrain for full-register spills; partial subreg spills keep
+    // the parent register class intact.
+    if (SrcReg.isVirtual() && SpillSize == 4 && SubRegIdx == 0) {
       MRI.constrainRegClass(SrcReg, &AMDGPU::SReg_32_XM0_XEXECRegClass);
     }
 
     BuildMI(MBB, MI, DL, OpDesc)
-      .addReg(SrcReg, getKillRegState(isKill)) // data
+      .addReg(SrcReg, getKillRegState(isKill), SubRegIdx) // data (SubRegIdx=0 for full reg)
       .addFrameIndex(FrameIndex)               // addr
       .addMemOperand(MMO)
       .addReg(MFI->getStackPtrOffsetReg(), RegState::Implicit);

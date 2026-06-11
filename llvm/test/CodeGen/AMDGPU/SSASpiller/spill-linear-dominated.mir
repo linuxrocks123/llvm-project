@@ -51,20 +51,21 @@ body: |
   ; CHECK-NEXT: {{^  $}}
   ; CHECK-NEXT:    %[[TMP:[0-9]+]]:vreg_128 = IMPLICIT_DEF
   ; CHECK-NEXT:    %[[W:[0-9]+]]:vreg_128 = COPY %[[TMP]]
-  ; CHECK-NEXT:    SI_SPILL_V128_SAVE %[[W]], %stack.0, $sgpr32, 0, implicit $exec ::
+  ; CHECK-NEXT:    SI_SPILL_V32_SAVE %[[W]].sub0, %stack.0, $sgpr32, 0, implicit $exec ::
   ; CHECK-NEXT: {{^  $}}
   ; CHECK:       bb.1:
   ; CHECK-NEXT:    successors: %bb.2(0x80000000)
   ; CHECK-NEXT: {{^  $}}
   ; CHECK-NEXT:    %[[P1:[0-9]+]]:vreg_64 = IMPLICIT_DEF
-  ; CHECK-NEXT:    SI_VIRTUAL_SPILL_MARKER %[[W]], 00000000000000FF
+  ; CHECK-NEXT:    SI_VIRTUAL_SPILL_MARKER %[[W]], 0000000000000003
   ; CHECK-NEXT:    %[[P2:[0-9]+]]:vreg_64 = IMPLICIT_DEF
   ; CHECK-NEXT:    %[[C1:[0-9]+]]:vreg_64 = COPY %[[P1]]
   ; CHECK-NEXT:    %[[C2:[0-9]+]]:vreg_64 = COPY %[[P2]]
   ; CHECK-NEXT:    S_NOP 0, implicit %[[C2]]
   ; CHECK-NEXT: {{^  $}}
   ; CHECK:       bb.2:
-  ; CHECK-NEXT:    %[[R:[0-9]+]]:vreg_128 = SI_SPILL_V128_RESTORE %stack.0, $sgpr32, 0, implicit $exec ::
+  ; CHECK-NEXT:    %[[RS:[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.0, $sgpr32, 0, implicit $exec ::
+  ; CHECK-NEXT:    %[[R:[0-9]+]]:vreg_128 = REG_SEQUENCE %[[RS]], %subreg.sub0, {{.*}}.sub1_sub2_sub3, %subreg.sub1_sub2_sub3
   ; CHECK-NEXT:    S_ENDPGM 0, implicit %[[R]], implicit %[[C1]]
 
   bb.0:

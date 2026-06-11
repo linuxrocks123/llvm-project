@@ -692,17 +692,22 @@ VRegMaskPairSet AMDGPUSSARegisterSpiller::getVMPsToSpill(
             if (RemainingToSpill == 0)
               break;
           } else {
-            // for now let's spill larger subreg but take care of unsigned overflow
-            ToSpill.insert(SubReg);
-            RemainingToSpill = 0;
+            // SubReg is still too wide. Decompose into 32-bit parts using
+            // getRegSplitParts and take only as many parts as needed.
+            // RemainingToSpill counts 32-bit pressure units; one unit occupies
+            // multiple lane-mask bits (e.g. sreg_32 uses mask 0x03).
+            const TargetRegisterClass *SubRC = SubReg.getRegClass(MRI, TRI);
+            ArrayRef<int16_t> Parts = TRI->getRegSplitParts(SubRC, 4);
+            for (int16_t PartSubRegIdx : Parts) {
+              LaneBitmask PartMask =
+                  TRI->getSubRegIndexLaneMask(PartSubRegIdx);
+              unsigned PartSize = TRI->getNumCoveredRegs(PartMask);
+              ToSpill.insert(VRegMaskPair(SubReg.getVReg(), PartMask));
+              RemainingToSpill -= std::min(PartSize, RemainingToSpill);
+              if (RemainingToSpill == 0)
+                break;
+            }
             break;
-            // TODO: find sub_mask of size RemainingToSpill in SubReg and spill it
-            /*LaneBitmask SubMask = SubReg.getLaneMask();
-            LaneBitmask SpillMask = SubMask &
-            LaneBitmask::getLow(RemainingToSpill);
-            ToSpill.insert(VRegMaskPair(SubReg.getVReg(), SpillMask));
-            RemainingToSpill -= SpillMask.getNumLanes();
-            */
           }
         }
         
