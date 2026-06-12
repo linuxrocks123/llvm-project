@@ -61,7 +61,7 @@ void AMDGPUSSARegisterAllocator::markFree(MCRegister PhysReg) {
 }
 
 MCRegister AMDGPUSSARegisterAllocator::pickFreePhysReg(
-    const TargetRegisterClass *RC) {
+    const TargetRegisterClass *RC, Register Reg) {
   LLVM_DEBUG({
     dbgs() << "    Allocation order for " << TRI->getRegClassName(RC) << ":";
     for (MCRegister PR : RegClassInfo.getOrder(RC))
@@ -69,10 +69,24 @@ MCRegister AMDGPUSSARegisterAllocator::pickFreePhysReg(
     dbgs() << "\n";
   });
 
+  // Augment the running OccupiedRegUnits with physregs of any already-colored
+  // vreg (from a wider-width pass) whose live interval overlaps with Reg's
+  // live interval. A point query (liveAt(DefSlot)) misses the case where the
+  // already-colored vreg starts its live range AFTER Reg's def but still
+  // interferes later — interval-overlap is the correct interference test.
+  BitVector OccupiedAtDef = OccupiedRegUnits;
+  const LiveInterval &VI = LIS->getInterval(Reg);
+  for (const auto &[W, WPhysReg] : ColorMap) {
+    if (LIS->getInterval(W).overlaps(VI)) {
+      for (MCRegUnit Unit : TRI->regunits(WPhysReg))
+        OccupiedAtDef.set(Unit);
+    }
+  }
+
   for (MCRegister PR : RegClassInfo.getOrder(RC)) {
     bool Free = true;
     for (MCRegUnit Unit : TRI->regunits(PR))
-      if (OccupiedRegUnits.test(Unit)) { Free = false; break; }
+      if (OccupiedAtDef.test(Unit)) { Free = false; break; }
     if (Free)
       return PR;
   }
@@ -161,7 +175,7 @@ void AMDGPUSSARegisterAllocator::colorByWidth(unsigned Width) {
           LLVM_DEBUG(dbgs() << "    tied: " << printReg(Reg, TRI)
                             << " inherits " << TRI->getName(Chosen) << "\n");
         } else {
-          Chosen = pickFreePhysReg(MRI->getRegClass(Reg));
+          Chosen = pickFreePhysReg(MRI->getRegClass(Reg), Reg);
           assert(Chosen && "Failed to find free physreg");
           LLVM_DEBUG(dbgs() << "    color: " << printReg(Reg, TRI)
                             << " -> " << TRI->getName(Chosen) << "\n");
@@ -390,6 +404,12 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
       MCRegister DstPhys = ColorMap.lookup(DstVReg);
       assert(DstPhys && "PHI result not colored");
 
+      // The PHI result physreg flows into this block from each predecessor.
+      // After the PHI is erased, the block has no definition of DstPhys, so
+      // we must declare it as a live-in so the verifier recognises it.
+      if (!MBB.isLiveIn(DstPhys))
+        MBB.addLiveIn(DstPhys);
+
       for (unsigned I = 1, E = MI.getNumOperands(); I < E; I += 2) {
         Register SrcVReg = MI.getOperand(I).getReg();
         MachineBasicBlock *Pred = MI.getOperand(I + 1).getMBB();
@@ -402,6 +422,7 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
 
       PHIsToErase.push_back(&MI);
     }
+    MBB.sortUniqueLiveIns();
 
     for (auto &[Pred, Copies] : PredCopies) {
       MachineBasicBlock *InsertMBB = Pred;
@@ -451,6 +472,23 @@ void AMDGPUSSARegisterAllocator::rewriteOperands(MachineFunction &MF) {
   }
 }
 
+// Update MBB live-in sets with the physical registers assigned to virtual
+// registers that are live at each block entry. VirtRegRewriter does this in
+// the greedy RA path; without it the machine verifier reports "Using an
+// undefined physical register" for cross-block physreg uses.
+void AMDGPUSSARegisterAllocator::addPhysRegLiveIns(MachineFunction &MF) {
+  for (MachineBasicBlock &MBB : MF) {
+    SlotIndex BBStart = LIS->getMBBStartIdx(&MBB);
+    for (const auto &[VReg, PhysReg] : ColorMap) {
+      if (LIS->getInterval(VReg).liveAt(BBStart)) {
+        if (!MBB.isLiveIn(PhysReg))
+          MBB.addLiveIn(PhysReg);
+      }
+    }
+    MBB.sortUniqueLiveIns();
+  }
+}
+
 // Set all MachineFunction properties that downstream passes require after
 // SSA destruction and physical register assignment are complete.
 // Mirrors the state produced by VirtRegRewriter in the greedy RA path:
@@ -462,6 +500,11 @@ void AMDGPUSSARegisterAllocator::rewriteOperands(MachineFunction &MF) {
 // post-RA passes such as MachineLICM that call livein_begin().
 void AMDGPUSSARegisterAllocator::finalizeProperties(MachineFunction &MF) {
   MRI->leaveSSA();
+  // Remove all virtual register declarations from MRI so that the verifier's
+  // NoVRegs check (MRI->getNumVirtRegs() == 0) passes. VirtRegRewriter does
+  // the same in the greedy RA path. Instruction operands are already physical
+  // after rewriteOperands(); this only removes the stale vreg table entries.
+  MRI->clearVirtRegs();
   MF.getProperties().set(MachineFunctionProperties::Property::NoPHIs);
   MF.getProperties().set(MachineFunctionProperties::Property::NoVRegs);
 }
@@ -512,6 +555,7 @@ void AMDGPUSSARegisterAllocator::destroySSAAndRewrite(MachineFunction &MF) {
   lowerPHIs(MF);
   rewriteOperands(MF);
   eliminateRegSequences(MF);
+  addPhysRegLiveIns(MF);
   finalizeProperties(MF);
 }
 

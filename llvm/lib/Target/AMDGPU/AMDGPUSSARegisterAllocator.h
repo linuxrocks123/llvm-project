@@ -58,7 +58,7 @@ class AMDGPUSSARegisterAllocator : public MachineFunctionPass {
   void seedOccupiedAtBBEntry(MachineBasicBlock *MBB);
   void markOccupied(MCRegister PhysReg);
   void markFree(MCRegister PhysReg);
-  MCRegister pickFreePhysReg(const TargetRegisterClass *RC);
+  MCRegister pickFreePhysReg(const TargetRegisterClass *RC, Register Reg);
 
   // === SSA Destruction + Operand Rewrite ===
   bool hasCFPseudos(MachineFunction &MF) const;
@@ -72,6 +72,7 @@ class AMDGPUSSARegisterAllocator : public MachineFunctionPass {
                 MCRegister RegA, MCRegister RegB);
   void rewriteOperands(MachineFunction &MF);
   void eliminateRegSequences(MachineFunction &MF);
+  void addPhysRegLiveIns(MachineFunction &MF);
   void finalizeProperties(MachineFunction &MF);
 
 public:
