@@ -61,7 +61,8 @@ void AMDGPUSSARegisterAllocator::markFree(MCRegister PhysReg) {
 }
 
 MCRegister AMDGPUSSARegisterAllocator::pickFreePhysReg(
-    const TargetRegisterClass *RC, Register Reg) {
+    const TargetRegisterClass *RC, const LiveInterval &VI,
+    ArrayRef<std::pair<MCRegister, const LiveInterval *>> WiderDefs) {
   LLVM_DEBUG({
     dbgs() << "    Allocation order for " << TRI->getRegClassName(RC) << ":";
     for (MCRegister PR : RegClassInfo.getOrder(RC))
@@ -69,15 +70,12 @@ MCRegister AMDGPUSSARegisterAllocator::pickFreePhysReg(
     dbgs() << "\n";
   });
 
-  // Augment the running OccupiedRegUnits with physregs of any already-colored
-  // vreg (from a wider-width pass) whose live interval overlaps with Reg's
-  // live interval. A point query (liveAt(DefSlot)) misses the case where the
-  // already-colored vreg starts its live range AFTER Reg's def but still
-  // interferes later — interval-overlap is the correct interference test.
+  // Augment OccupiedRegUnits with physregs of any wider-width vreg assigned
+  // in this block whose live interval overlaps VI. WiderDefs is tiny (bounded
+  // by the number of wider-width defs in this MBB) — no ColorMap scan needed.
   BitVector OccupiedAtDef = OccupiedRegUnits;
-  const LiveInterval &VI = LIS->getInterval(Reg);
-  for (const auto &[W, WPhysReg] : ColorMap) {
-    if (LIS->getInterval(W).overlaps(VI)) {
+  for (const auto &[WPhysReg, WLI] : WiderDefs) {
+    if (WLI->overlaps(VI)) {
       for (MCRegUnit Unit : TRI->regunits(WPhysReg))
         OccupiedAtDef.set(Unit);
     }
@@ -114,91 +112,109 @@ void AMDGPUSSARegisterAllocator::seedOccupiedAtBBEntry(MachineBasicBlock *MBB) {
   }
 }
 
-void AMDGPUSSARegisterAllocator::colorByWidth(unsigned Width) {
-  LLVM_DEBUG(dbgs() << "\n=== Width pass: " << Width << "-bit ===\n");
+void AMDGPUSSARegisterAllocator::color() {
+  LLVM_DEBUG({
+    dbgs() << "Coloring order (width descending):";
+    for (unsigned W : ColoringOrder)
+      dbgs() << " " << W;
+    dbgs() << "\n";
+  });
 
+  // Process one MBB at a time across ALL width passes. This lets us maintain
+  // a tiny per-MBB WiderDefs accumulator that records physreg assignments made
+  // in THIS block by wider (already-completed) passes. Narrower passes consult
+  // WiderDefs in pickFreePhysReg to catch cross-width interference from vregs
+  // defined mid-block — without scanning ColorMap at every def site.
   for (auto *Node : depth_first(MDT->getRootNode())) {
     MachineBasicBlock *MBB = Node->getBlock();
-    seedOccupiedAtBBEntry(MBB);
 
-    for (MachineInstr &MI : *MBB) {
-      // Kill uses before coloring defs: a def can reuse the physreg of
-      // a source that dies at this instruction (no interference without
-      // early-clobber). PHIs skipped: their sources are live only to
-      // predecessor boundaries, and markFree would clear physregs that
-      // preceding PHI defs already claimed.
-      if (!MI.isPHI()) {
-        SlotIndex NextSI = LIS->getInstructionIndex(MI).getRegSlot().getNextSlot();
-        for (const MachineOperand &MO : MI.uses()) {
-          if (!MO.isReg())
-            continue;
+    // WiderDefs: (physreg, &live-interval) for every vreg colored in this MBB
+    // by a wider pass. Size is bounded by the number of wider-width defs in
+    // this specific block — typically 0–5.
+    SmallVector<std::pair<MCRegister, const LiveInterval *>, 8> WiderDefs;
+
+    for (unsigned Width : ColoringOrder) {
+      LLVM_DEBUG(dbgs() << "\n=== Width pass: " << Width << "-bit, "
+                        << printMBBReference(*MBB) << " ===\n");
+      seedOccupiedAtBBEntry(MBB);
+
+      for (MachineInstr &MI : *MBB) {
+        // Kill uses before coloring defs: a def can reuse the physreg of
+        // a source that dies at this instruction (no interference without
+        // early-clobber). PHIs skipped: their sources are live only to
+        // predecessor boundaries, and markFree would clear physregs that
+        // preceding PHI defs already claimed.
+        if (!MI.isPHI()) {
+          SlotIndex NextSI = LIS->getInstructionIndex(MI).getRegSlot().getNextSlot();
+          for (const MachineOperand &MO : MI.uses()) {
+            if (!MO.isReg())
+              continue;
+            Register Reg = MO.getReg();
+            if (Reg.isPhysical()) {
+              for (MCRegUnit Unit : TRI->regunits(Reg))
+                if (!LIS->getRegUnit(Unit).liveAt(NextSI))
+                  OccupiedRegUnits.reset(Unit);
+              continue;
+            }
+            auto It = ColorMap.find(Reg);
+            if (It == ColorMap.end())
+              continue;
+            if (!LIS->getInterval(Reg).liveAt(NextSI)) {
+              markFree(It->second);
+              LLVM_DEBUG(dbgs() << "    kill: " << printReg(Reg, TRI)
+                                << " free " << TRI->getName(It->second) << "\n");
+            }
+          }
+        }
+
+        for (MachineOperand &MO : MI.defs()) {
           Register Reg = MO.getReg();
-          if (Reg.isPhysical()) {
-            for (MCRegUnit Unit : TRI->regunits(Reg))
-              if (!LIS->getRegUnit(Unit).liveAt(NextSI))
-                OccupiedRegUnits.reset(Unit);
+          if (!Reg.isVirtual()) {
+            markOccupied(Reg);
             continue;
           }
-          auto It = ColorMap.find(Reg);
-          if (It == ColorMap.end())
+
+          if (TRI->getRegSizeInBits(*MRI->getRegClass(Reg)) != Width) {
+            if (auto It = ColorMap.find(Reg); It != ColorMap.end()) {
+              markOccupied(It->second);
+              LLVM_DEBUG(dbgs() << "    mark wider def: "
+                                << printReg(Reg, TRI) << " -> "
+                                << TRI->getName(It->second) << "\n");
+            }
             continue;
-          if (!LIS->getInterval(Reg).liveAt(NextSI)) {
-            markFree(It->second);
-            LLVM_DEBUG(dbgs() << "    kill: " << printReg(Reg, TRI)
-                              << " free " << TRI->getName(It->second) << "\n");
           }
-        }
-      }
 
-      for (MachineOperand &MO : MI.defs()) {
-        Register Reg = MO.getReg();
-        if (!Reg.isVirtual()) {
-          markOccupied(Reg);
-          continue;
-        }
-
-        if (TRI->getRegSizeInBits(*MRI->getRegClass(Reg)) != Width) {
-          if (auto It = ColorMap.find(Reg); It != ColorMap.end()) {
-            markOccupied(It->second);
-            LLVM_DEBUG(dbgs() << "    mark wider def: "
-                              << printReg(Reg, TRI) << " -> "
-                              << TRI->getName(It->second) << "\n");
+          MCRegister Chosen;
+          unsigned UseOpIdx;
+          if (MI.isRegTiedToUseOperand(MO.getOperandNo(), &UseOpIdx)) {
+            Chosen = ColorMap.lookup(MI.getOperand(UseOpIdx).getReg());
+            assert(Chosen && "Tied use must be colored already");
+            LLVM_DEBUG(dbgs() << "    tied: " << printReg(Reg, TRI)
+                              << " inherits " << TRI->getName(Chosen) << "\n");
+          } else {
+            Chosen = pickFreePhysReg(MRI->getRegClass(Reg),
+                                     LIS->getInterval(Reg), WiderDefs);
+            assert(Chosen && "Failed to find free physreg");
+            LLVM_DEBUG(dbgs() << "    color: " << printReg(Reg, TRI)
+                              << " -> " << TRI->getName(Chosen) << "\n");
           }
-          continue;
+
+          ColorMap[Reg] = Chosen;
+          markOccupied(Chosen);
+          // Record in WiderDefs so narrower passes can detect interference.
+          WiderDefs.push_back({Chosen, &LIS->getInterval(Reg)});
+
+          const TargetRegisterClass *RC = MRI->getRegClass(Reg);
+          unsigned Idx = TRI->getHWRegIndex(Chosen);
+          unsigned W = TRI->getRegSizeInBits(*RC) / 32;
+          if (TRI->isVGPRClass(RC))
+            MaxVGPRIdx = std::max(MaxVGPRIdx, Idx + W);
+          else if (TRI->isSGPRClass(RC))
+            MaxSGPRIdx = std::max(MaxSGPRIdx, Idx + W);
         }
-
-        MCRegister Chosen;
-        unsigned UseOpIdx;
-        if (MI.isRegTiedToUseOperand(MO.getOperandNo(), &UseOpIdx)) {
-          Chosen = ColorMap.lookup(MI.getOperand(UseOpIdx).getReg());
-          assert(Chosen && "Tied use must be colored already");
-          LLVM_DEBUG(dbgs() << "    tied: " << printReg(Reg, TRI)
-                            << " inherits " << TRI->getName(Chosen) << "\n");
-        } else {
-          Chosen = pickFreePhysReg(MRI->getRegClass(Reg), Reg);
-          assert(Chosen && "Failed to find free physreg");
-          LLVM_DEBUG(dbgs() << "    color: " << printReg(Reg, TRI)
-                            << " -> " << TRI->getName(Chosen) << "\n");
-        }
-
-        ColorMap[Reg] = Chosen;
-        markOccupied(Chosen);
-
-        const TargetRegisterClass *RC = MRI->getRegClass(Reg);
-        unsigned Idx = TRI->getHWRegIndex(Chosen);
-        unsigned W = TRI->getRegSizeInBits(*RC) / 32;
-        if (TRI->isVGPRClass(RC))
-          MaxVGPRIdx = std::max(MaxVGPRIdx, Idx + W);
-        else if (TRI->isSGPRClass(RC))
-          MaxSGPRIdx = std::max(MaxSGPRIdx, Idx + W);
       }
     }
   }
-}
-
-void AMDGPUSSARegisterAllocator::color() {
-  for (unsigned Width : ColoringOrder)
-    colorByWidth(Width);
 
   LLVM_DEBUG({
     dbgs() << "\nColoring result:\n";
@@ -578,6 +594,7 @@ bool AMDGPUSSARegisterAllocator::runOnMachineFunction(MachineFunction &MF) {
   classifyVRegs();
   OccupiedRegUnits.clear();
   OccupiedRegUnits.resize(TRI->getNumRegUnits());
+
   ColorMap.clear();
   MaxVGPRIdx = 0;
   MaxSGPRIdx = 0;

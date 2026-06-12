@@ -54,11 +54,12 @@ class AMDGPUSSARegisterAllocator : public MachineFunctionPass {
   // === Coloring ===
   void classifyVRegs();
   void color();
-  void colorByWidth(unsigned Width);
   void seedOccupiedAtBBEntry(MachineBasicBlock *MBB);
   void markOccupied(MCRegister PhysReg);
   void markFree(MCRegister PhysReg);
-  MCRegister pickFreePhysReg(const TargetRegisterClass *RC, Register Reg);
+  MCRegister pickFreePhysReg(const TargetRegisterClass *RC,
+                              const LiveInterval &VI,
+                              ArrayRef<std::pair<MCRegister, const LiveInterval *>> WiderDefs);
 
   // === SSA Destruction + Operand Rewrite ===
   bool hasCFPseudos(MachineFunction &MF) const;
