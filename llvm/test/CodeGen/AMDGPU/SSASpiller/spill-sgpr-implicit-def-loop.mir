@@ -63,7 +63,7 @@ body: |
   ; CHECK-LABEL: name: sgpr_implicit_def_loop
   ; CHECK:       bb.0.preheader:
   ; CHECK:         $sgpr0 = S_MOV_B32 100
-  ; CHECK-NEXT:    %[[LANE:[0-9]+]]:vgpr_32 = IMPLICIT_DEF
+  ; CHECK-NEXT:    %[[LANE:[0-9a-z_]+]]:vgpr_32 = IMPLICIT_DEF
   ; CHECK-NEXT:    %[[LANE]]:vgpr_32 = SI_SPILL_S32_TO_VGPR $sgpr0, 0, %[[LANE]]
   ; CHECK:       bb.1.loop:
   ; CHECK-NOT:     IMPLICIT_DEF

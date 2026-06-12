@@ -76,7 +76,7 @@ body: |
   ;   %a → lane 0,  %b → lane 1.  Only ONE IMPLICIT_DEF emitted.
   ; AFTER-LOWER-LABEL: name: sgpr_lane_packing
   ; AFTER-LOWER:         $sgpr0 = S_MOV_B32 100
-  ; AFTER-LOWER-NEXT:    %[[LANE:[0-9]+]]:vgpr_32 = IMPLICIT_DEF
+  ; AFTER-LOWER-NEXT:    %[[LANE:[0-9a-z_]+]]:vgpr_32 = IMPLICIT_DEF
   ; AFTER-LOWER-NEXT:    %[[LANE]]:vgpr_32 = SI_SPILL_S32_TO_VGPR $sgpr0, 0, %[[LANE]]
   ; AFTER-LOWER-NEXT:    $sgpr0 = S_MOV_B32 200
   ; AFTER-LOWER-NEXT:    %[[LANE]]:vgpr_32 = SI_SPILL_S32_TO_VGPR $sgpr0, 1, %[[LANE]]

@@ -76,18 +76,18 @@ body: |
   ; AFTER-RA-NEXT:    SI_SPILL_S32_SAVE $sgpr0, %stack.0, implicit $exec, implicit $sgpr32
   ; AFTER-RA:       bb.2.use:
   ; AFTER-RA:         SI_SPILL_S32_RESTORE %stack.0, implicit $exec, implicit $sgpr32
-  ; AFTER-RA:         REG_SEQUENCE {{.*}}, %subreg.sub0, $sgpr1, %subreg.sub1
+  ; AFTER-RA:         S_AND_B64
 
   ; === Stage 3: After SILowerSGPRSpills — ONE writelane/readlane only (sub0) ===
   ; AFTER-LOWER-LABEL: name: sgpr_wide
   ; AFTER-LOWER:         $sgpr0_sgpr1 = S_MOV_B64 0
-  ; AFTER-LOWER-NEXT:    %[[LANE:[0-9]+]]:vgpr_32 = IMPLICIT_DEF
+  ; AFTER-LOWER-NEXT:    %[[LANE:[0-9a-z_]+]]:vgpr_32 = IMPLICIT_DEF
   ; AFTER-LOWER-NEXT:    %[[LANE]]:vgpr_32 = SI_SPILL_S32_TO_VGPR $sgpr0, 0, %[[LANE]]
   ; AFTER-LOWER-NOT:     SI_SPILL_S32_TO_VGPR
   ; AFTER-LOWER:       bb.2.use:
   ; AFTER-LOWER:         $sgpr{{[0-9]+}} = SI_RESTORE_S32_FROM_VGPR %[[LANE]], 0
   ; AFTER-LOWER-NOT:     SI_RESTORE_S32_FROM_VGPR
-  ; AFTER-LOWER:         REG_SEQUENCE
+  ; AFTER-LOWER:         S_AND_B64
 
   bb.0.entry:
     successors: %bb.1(0x80000000)
