@@ -32,7 +32,7 @@
   entry:
     ret void
   }
-  attributes #0 = { "amdgpu-num-sgpr"="8" "target-cpu"="gfx1200" }
+  attributes #0 = { "amdgpu-num-sgpr"="7" "target-cpu"="gfx1200" }
 ...
 ---
 name:            sgpr_implicit_def_linear

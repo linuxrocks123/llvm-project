@@ -2529,14 +2529,14 @@ bool AMDGPUSSARegisterSpiller::runOnMachineFunction(MachineFunction &MF) {
   unsigned VGPRLimit = ST.getMaxNumVGPRs(MF);
   unsigned SGPRLimit = ST.getMaxNumSGPRs(MF);
   
-  // Apply a safety margin to avoid over-spilling
-  // We target slightly below the limit to leave room for:
-  // - Register allocator's own requirements
-  // - Compiler-generated temporaries
-  // - ABI reserved registers
-  // Using 90% of the limit as a conservative threshold
-  VGPRLimit = (VGPRLimit * 9) / 10;
-  SGPRLimit = (SGPRLimit * 9) / 10;
+  // Reserve a ~10% safety margin (RA temporaries, compiler temporaries, ABI
+  // reserved registers). Subtract floor(10%) rather than computing (N*9)/10:
+  // the latter truncates the *limit* down, which rounds the *margin up* and
+  // cuts 25-50% from small budgets (e.g. N=3 -> 2). Subtracting N/10 makes the
+  // margin a true floor(10%) — 0 for budgets < 10, ~10% for large files — so a
+  // small but satisfiable budget is targeted exactly instead of infeasibly.
+  VGPRLimit -= VGPRLimit / 10;
+  SGPRLimit -= SGPRLimit / 10;
 
   LLVM_DEBUG(dbgs() << "Register pressure limits (90% of max): VGPR=" << VGPRLimit
                     << ", SGPR=" << SGPRLimit << "\n");
@@ -2554,11 +2554,19 @@ bool AMDGPUSSARegisterSpiller::runOnMachineFunction(MachineFunction &MF) {
 
   // Account for VGPRs consumed by SGPR-spill-to-lane and shrink the VGPR
   // budget for Pass 2. Actual lowering happens later (at SGPR coloring).
-  unsigned SpillVGPRsUsed = 0;
-  if (ChangedSGPR)
-    SpillVGPRsUsed = countSGPRSpillVGPRs(MF);
-  assert(SpillVGPRsUsed <= VGPRLimit && "SGPR spill lanes exceed VGPR budget");
-  VGPRLimit -= SpillVGPRsUsed;
+  // SGPR spills materialize as WWM VGPR lanes (added later by SILowerSGPRSpills),
+  // which need physical VGPRs on top of the per-thread allocation. Reserve them
+  // only when we actually spilled SGPRs, and credit the proportional margin that
+  // is already held back: if the margin (getMaxNumVGPRs/10) already covers the
+  // lanes, no extra reservation; otherwise reserve only the shortfall.
+  if (ChangedSGPR) {
+    unsigned SpillVGPRsUsed = countSGPRSpillVGPRs(MF);
+    unsigned MarginReserved = ST.getMaxNumVGPRs(MF) / 10;
+    unsigned ExtraReserve =
+        SpillVGPRsUsed > MarginReserved ? SpillVGPRsUsed - MarginReserved : 0;
+    assert(ExtraReserve <= VGPRLimit && "SGPR spill lanes exceed VGPR budget");
+    VGPRLimit -= ExtraReserve;
+  }
 
   // Pass 2: VGPR Spilling
   LLVM_DEBUG(dbgs() << "\n=== Pass 2: Processing VGPRs ===\n");

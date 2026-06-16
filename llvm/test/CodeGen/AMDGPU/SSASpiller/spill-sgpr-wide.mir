@@ -52,7 +52,7 @@
   use:
     ret void
   }
-  attributes #0 = { "amdgpu-num-sgpr"="10" "target-cpu"="gfx1200" }
+  attributes #0 = { "amdgpu-num-sgpr"="9" "target-cpu"="gfx1200" }
 ...
 ---
 name:            sgpr_wide

@@ -33,7 +33,7 @@
     ret void
   }
 
-  attributes #0 = { "amdgpu-num-vgpr"="8" "target-cpu"="gfx1200" }
+  attributes #0 = { "amdgpu-num-vgpr"="7" "target-cpu"="gfx1200" }
 ...
 ---
 name:            test_multi_path_independent

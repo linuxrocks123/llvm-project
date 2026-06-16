@@ -2302,7 +2302,6 @@ body:             |
   ; CHECK-NEXT:   [[COPY197:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_39]].sub0
   ; CHECK-NEXT:   [[REG_SEQUENCE13:%[0-9]+]]:vreg_1024 = REG_SEQUENCE [[COPY197]], %subreg.sub0, [[COPY196]], %subreg.sub1, [[COPY195]], %subreg.sub2, [[COPY194]], %subreg.sub3, [[COPY193]], %subreg.sub4, [[COPY192]], %subreg.sub5, [[COPY191]], %subreg.sub6, [[COPY190]], %subreg.sub7, [[COPY189]], %subreg.sub8, [[COPY188]], %subreg.sub9, [[COPY187]], %subreg.sub10, [[COPY186]], %subreg.sub11, [[COPY185]], %subreg.sub12, [[COPY184]], %subreg.sub13, [[COPY183]], %subreg.sub14, [[COPY182]], %subreg.sub15, [[COPY181]], %subreg.sub16, [[COPY180]], %subreg.sub17, [[COPY179]], %subreg.sub18, [[COPY178]], %subreg.sub19, [[COPY177]], %subreg.sub20, [[COPY176]], %subreg.sub21, [[COPY175]], %subreg.sub22, [[COPY174]], %subreg.sub23, [[COPY173]], %subreg.sub24, [[COPY172]], %subreg.sub25, [[COPY171]], %subreg.sub26, [[COPY170]], %subreg.sub27, [[COPY169]], %subreg.sub28, [[COPY168]], %subreg.sub29, [[COPY167]], %subreg.sub30, [[COPY166]], %subreg.sub31
   ; CHECK-NEXT:   [[COPY198:%[0-9]+]]:vreg_1024 = COPY [[REG_SEQUENCE13]]
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY198]].sub27, %stack.27, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.27, addrspace 5)
   ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY198]].sub26, %stack.26, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.26, addrspace 5)
   ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY198]].sub25, %stack.25, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.25, addrspace 5)
   ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY198]].sub24, %stack.24, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.24, addrspace 5)
@@ -2330,68 +2329,67 @@ body:             |
   ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY198]].sub2, %stack.2, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.2, addrspace 5)
   ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY198]].sub1, %stack.1, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.1, addrspace 5)
   ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY198]].sub0, %stack.0, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.0, addrspace 5)
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 000000000000000C
   ; CHECK-NEXT:   [[GLOBAL_LOAD_DWORDX4_40:%[0-9]+]]:vreg_128 = GLOBAL_LOAD_DWORDX4 [[REG_SEQUENCE7]], 112, 0, implicit $exec :: (volatile load (s128) from %ir.p6 + 112, addrspace 1)
   ; CHECK-NEXT:   [[COPY199:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_40]].sub3
   ; CHECK-NEXT:   [[COPY200:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_40]].sub2
   ; CHECK-NEXT:   [[COPY201:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_40]].sub1
   ; CHECK-NEXT:   [[COPY202:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_40]].sub0
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0000000000000030
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 00000000000000C0
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0000000000000300
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0000000000000C00
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 000000000000000C
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0000000000000030
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 00000000000000C0
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0000000000000300
   ; CHECK-NEXT:   [[GLOBAL_LOAD_DWORDX4_41:%[0-9]+]]:vreg_128 = GLOBAL_LOAD_DWORDX4 [[REG_SEQUENCE7]], 96, 0, implicit $exec :: (volatile load (s128) from %ir.p6 + 96, align 32, addrspace 1)
   ; CHECK-NEXT:   [[COPY203:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_41]].sub3
   ; CHECK-NEXT:   [[COPY204:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_41]].sub2
   ; CHECK-NEXT:   [[COPY205:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_41]].sub1
   ; CHECK-NEXT:   [[COPY206:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_41]].sub0
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0000000000003000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 000000000000C000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0000000000030000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 00000000000C0000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0000000000000C00
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0000000000003000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 000000000000C000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0000000000030000
   ; CHECK-NEXT:   [[GLOBAL_LOAD_DWORDX4_42:%[0-9]+]]:vreg_128 = GLOBAL_LOAD_DWORDX4 [[REG_SEQUENCE7]], 80, 0, implicit $exec :: (volatile load (s128) from %ir.p6 + 80, addrspace 1)
   ; CHECK-NEXT:   [[COPY207:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_42]].sub3
   ; CHECK-NEXT:   [[COPY208:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_42]].sub2
   ; CHECK-NEXT:   [[COPY209:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_42]].sub1
   ; CHECK-NEXT:   [[COPY210:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_42]].sub0
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0000000000300000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0000000000C00000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0000000003000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 000000000C000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 00000000000C0000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0000000000300000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0000000000C00000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0000000003000000
   ; CHECK-NEXT:   [[GLOBAL_LOAD_DWORDX4_43:%[0-9]+]]:vreg_128 = GLOBAL_LOAD_DWORDX4 [[REG_SEQUENCE7]], 64, 0, implicit $exec :: (volatile load (s128) from %ir.p6 + 64, align 64, addrspace 1)
   ; CHECK-NEXT:   [[COPY211:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_43]].sub3
   ; CHECK-NEXT:   [[COPY212:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_43]].sub2
   ; CHECK-NEXT:   [[COPY213:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_43]].sub1
   ; CHECK-NEXT:   [[COPY214:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_43]].sub0
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0000000030000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 00000000C0000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0000000300000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0000000C00000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 000000000C000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0000000030000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 00000000C0000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0000000300000000
   ; CHECK-NEXT:   [[GLOBAL_LOAD_DWORDX4_44:%[0-9]+]]:vreg_128 = GLOBAL_LOAD_DWORDX4 [[REG_SEQUENCE7]], 48, 0, implicit $exec :: (volatile load (s128) from %ir.p6 + 48, addrspace 1)
   ; CHECK-NEXT:   [[COPY215:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_44]].sub3
   ; CHECK-NEXT:   [[COPY216:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_44]].sub2
   ; CHECK-NEXT:   [[COPY217:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_44]].sub1
   ; CHECK-NEXT:   [[COPY218:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_44]].sub0
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0000003000000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 000000C000000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0000030000000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 00000C0000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0000000C00000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0000003000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 000000C000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0000030000000000
   ; CHECK-NEXT:   [[GLOBAL_LOAD_DWORDX4_45:%[0-9]+]]:vreg_128 = GLOBAL_LOAD_DWORDX4 [[REG_SEQUENCE7]], 32, 0, implicit $exec :: (volatile load (s128) from %ir.p6 + 32, align 32, addrspace 1)
   ; CHECK-NEXT:   [[COPY219:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_45]].sub3
   ; CHECK-NEXT:   [[COPY220:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_45]].sub2
   ; CHECK-NEXT:   [[COPY221:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_45]].sub1
   ; CHECK-NEXT:   [[COPY222:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_45]].sub0
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0000300000000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0000C00000000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0003000000000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 000C000000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 00000C0000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0000300000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0000C00000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0003000000000000
   ; CHECK-NEXT:   [[GLOBAL_LOAD_DWORDX4_46:%[0-9]+]]:vreg_128 = GLOBAL_LOAD_DWORDX4 [[REG_SEQUENCE7]], 16, 0, implicit $exec :: (volatile load (s128) from %ir.p6 + 16, addrspace 1)
   ; CHECK-NEXT:   [[COPY223:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_46]].sub3
   ; CHECK-NEXT:   [[COPY224:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_46]].sub2
   ; CHECK-NEXT:   [[COPY225:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_46]].sub1
   ; CHECK-NEXT:   [[COPY226:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_46]].sub0
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 0030000000000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %4, 00C0000000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 000C000000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY198]], 0030000000000000
   ; CHECK-NEXT:   [[GLOBAL_LOAD_DWORDX4_47:%[0-9]+]]:vreg_128 = GLOBAL_LOAD_DWORDX4 [[REG_SEQUENCE7]], 0, 0, implicit $exec :: (volatile load (s128) from %ir.p6, align 128, addrspace 1)
   ; CHECK-NEXT:   [[COPY227:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_47]].sub3
   ; CHECK-NEXT:   [[COPY228:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_47]].sub2
@@ -2399,100 +2397,100 @@ body:             |
   ; CHECK-NEXT:   [[COPY230:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_47]].sub0
   ; CHECK-NEXT:   [[REG_SEQUENCE14:%[0-9]+]]:vreg_1024 = REG_SEQUENCE [[COPY230]], %subreg.sub0, [[COPY229]], %subreg.sub1, [[COPY228]], %subreg.sub2, [[COPY227]], %subreg.sub3, [[COPY226]], %subreg.sub4, [[COPY225]], %subreg.sub5, [[COPY224]], %subreg.sub6, [[COPY223]], %subreg.sub7, [[COPY222]], %subreg.sub8, [[COPY221]], %subreg.sub9, [[COPY220]], %subreg.sub10, [[COPY219]], %subreg.sub11, [[COPY218]], %subreg.sub12, [[COPY217]], %subreg.sub13, [[COPY216]], %subreg.sub14, [[COPY215]], %subreg.sub15, [[COPY214]], %subreg.sub16, [[COPY213]], %subreg.sub17, [[COPY212]], %subreg.sub18, [[COPY211]], %subreg.sub19, [[COPY210]], %subreg.sub20, [[COPY209]], %subreg.sub21, [[COPY208]], %subreg.sub22, [[COPY207]], %subreg.sub23, [[COPY206]], %subreg.sub24, [[COPY205]], %subreg.sub25, [[COPY204]], %subreg.sub26, [[COPY203]], %subreg.sub27, [[COPY202]], %subreg.sub28, [[COPY201]], %subreg.sub29, [[COPY200]], %subreg.sub30, [[COPY199]], %subreg.sub31
   ; CHECK-NEXT:   [[COPY231:%[0-9]+]]:vreg_1024 = COPY [[REG_SEQUENCE14]]
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub29, %stack.57, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.57, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub28, %stack.56, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.56, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub27, %stack.55, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.55, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub26, %stack.54, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.54, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub25, %stack.53, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.53, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub24, %stack.52, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.52, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub23, %stack.51, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.51, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub22, %stack.50, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.50, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub21, %stack.49, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.49, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub20, %stack.48, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.48, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub19, %stack.47, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.47, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub18, %stack.46, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.46, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub17, %stack.45, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.45, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub16, %stack.44, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.44, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub15, %stack.43, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.43, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub14, %stack.42, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.42, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub13, %stack.41, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.41, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub12, %stack.40, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.40, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub11, %stack.39, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.39, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub10, %stack.38, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.38, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub9, %stack.37, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.37, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub8, %stack.36, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.36, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub7, %stack.35, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.35, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub6, %stack.34, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.34, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub5, %stack.33, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.33, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub4, %stack.32, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.32, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub3, %stack.31, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.31, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub2, %stack.30, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.30, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub1, %stack.29, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.29, addrspace 5)
-  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub0, %stack.28, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.28, addrspace 5)
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 000000000000000C
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0000000000000030
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 00000000000000C0
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub29, %stack.56, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.56, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub28, %stack.55, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.55, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub27, %stack.54, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.54, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub26, %stack.53, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.53, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub25, %stack.52, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.52, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub24, %stack.51, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.51, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub23, %stack.50, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.50, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub22, %stack.49, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.49, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub21, %stack.48, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.48, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub20, %stack.47, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.47, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub19, %stack.46, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.46, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub18, %stack.45, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.45, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub17, %stack.44, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.44, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub16, %stack.43, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.43, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub15, %stack.42, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.42, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub14, %stack.41, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.41, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub13, %stack.40, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.40, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub12, %stack.39, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.39, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub11, %stack.38, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.38, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub10, %stack.37, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.37, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub9, %stack.36, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.36, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub8, %stack.35, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.35, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub7, %stack.34, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.34, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub6, %stack.33, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.33, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub5, %stack.32, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.32, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub4, %stack.31, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.31, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub3, %stack.30, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.30, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub2, %stack.29, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.29, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub1, %stack.28, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.28, addrspace 5)
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[COPY231]].sub0, %stack.27, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.27, addrspace 5)
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 000000000000000C
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0000000000000030
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 00000000000000C0
   ; CHECK-NEXT:   [[GLOBAL_LOAD_DWORDX4_48:%[0-9]+]]:vreg_128 = GLOBAL_LOAD_DWORDX4 [[REG_SEQUENCE8]], 112, 0, implicit $exec :: (volatile load (s128) from %ir.p7 + 112, addrspace 1)
   ; CHECK-NEXT:   [[COPY232:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_48]].sub3
   ; CHECK-NEXT:   [[COPY233:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_48]].sub2
   ; CHECK-NEXT:   [[COPY234:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_48]].sub1
   ; CHECK-NEXT:   [[COPY235:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_48]].sub0
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0000000000000300
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0000000000000C00
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0000000000003000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 000000000000C000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0000000000000300
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0000000000000C00
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0000000000003000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 000000000000C000
   ; CHECK-NEXT:   [[GLOBAL_LOAD_DWORDX4_49:%[0-9]+]]:vreg_128 = GLOBAL_LOAD_DWORDX4 [[REG_SEQUENCE8]], 96, 0, implicit $exec :: (volatile load (s128) from %ir.p7 + 96, align 32, addrspace 1)
   ; CHECK-NEXT:   [[COPY236:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_49]].sub3
   ; CHECK-NEXT:   [[COPY237:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_49]].sub2
   ; CHECK-NEXT:   [[COPY238:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_49]].sub1
   ; CHECK-NEXT:   [[COPY239:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_49]].sub0
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0000000000030000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 00000000000C0000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0000000000300000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0000000000C00000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0000000000030000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 00000000000C0000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0000000000300000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0000000000C00000
   ; CHECK-NEXT:   [[GLOBAL_LOAD_DWORDX4_50:%[0-9]+]]:vreg_128 = GLOBAL_LOAD_DWORDX4 [[REG_SEQUENCE8]], 80, 0, implicit $exec :: (volatile load (s128) from %ir.p7 + 80, addrspace 1)
   ; CHECK-NEXT:   [[COPY240:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_50]].sub3
   ; CHECK-NEXT:   [[COPY241:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_50]].sub2
   ; CHECK-NEXT:   [[COPY242:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_50]].sub1
   ; CHECK-NEXT:   [[COPY243:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_50]].sub0
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0000000003000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 000000000C000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0000000030000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 00000000C0000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0000000003000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 000000000C000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0000000030000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 00000000C0000000
   ; CHECK-NEXT:   [[GLOBAL_LOAD_DWORDX4_51:%[0-9]+]]:vreg_128 = GLOBAL_LOAD_DWORDX4 [[REG_SEQUENCE8]], 64, 0, implicit $exec :: (volatile load (s128) from %ir.p7 + 64, align 64, addrspace 1)
   ; CHECK-NEXT:   [[COPY244:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_51]].sub3
   ; CHECK-NEXT:   [[COPY245:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_51]].sub2
   ; CHECK-NEXT:   [[COPY246:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_51]].sub1
   ; CHECK-NEXT:   [[COPY247:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_51]].sub0
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0000000300000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0000000C00000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0000003000000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 000000C000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0000000300000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0000000C00000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0000003000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 000000C000000000
   ; CHECK-NEXT:   [[GLOBAL_LOAD_DWORDX4_52:%[0-9]+]]:vreg_128 = GLOBAL_LOAD_DWORDX4 [[REG_SEQUENCE8]], 48, 0, implicit $exec :: (volatile load (s128) from %ir.p7 + 48, addrspace 1)
   ; CHECK-NEXT:   [[COPY248:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_52]].sub3
   ; CHECK-NEXT:   [[COPY249:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_52]].sub2
   ; CHECK-NEXT:   [[COPY250:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_52]].sub1
   ; CHECK-NEXT:   [[COPY251:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_52]].sub0
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0000030000000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 00000C0000000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0000300000000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0000C00000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0000030000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 00000C0000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0000300000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0000C00000000000
   ; CHECK-NEXT:   [[GLOBAL_LOAD_DWORDX4_53:%[0-9]+]]:vreg_128 = GLOBAL_LOAD_DWORDX4 [[REG_SEQUENCE8]], 32, 0, implicit $exec :: (volatile load (s128) from %ir.p7 + 32, align 32, addrspace 1)
   ; CHECK-NEXT:   [[COPY252:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_53]].sub3
   ; CHECK-NEXT:   [[COPY253:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_53]].sub2
   ; CHECK-NEXT:   [[COPY254:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_53]].sub1
   ; CHECK-NEXT:   [[COPY255:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_53]].sub0
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0003000000000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 000C000000000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0030000000000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 00C0000000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0003000000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 000C000000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0030000000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 00C0000000000000
   ; CHECK-NEXT:   [[GLOBAL_LOAD_DWORDX4_54:%[0-9]+]]:vreg_128 = GLOBAL_LOAD_DWORDX4 [[REG_SEQUENCE8]], 16, 0, implicit $exec :: (volatile load (s128) from %ir.p7 + 16, addrspace 1)
   ; CHECK-NEXT:   [[COPY256:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_54]].sub3
   ; CHECK-NEXT:   [[COPY257:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_54]].sub2
   ; CHECK-NEXT:   [[COPY258:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_54]].sub1
   ; CHECK-NEXT:   [[COPY259:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_54]].sub0
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0300000000000000
-  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER %5, 0C00000000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0300000000000000
+  ; CHECK-NEXT:   SI_VIRTUAL_SPILL_MARKER [[COPY231]], 0C00000000000000
   ; CHECK-NEXT:   [[GLOBAL_LOAD_DWORDX4_55:%[0-9]+]]:vreg_128 = GLOBAL_LOAD_DWORDX4 [[REG_SEQUENCE8]], 0, 0, implicit $exec :: (volatile load (s128) from %ir.p7, align 128, addrspace 1)
   ; CHECK-NEXT:   [[COPY260:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_55]].sub3
   ; CHECK-NEXT:   [[COPY261:%[0-9]+]]:vgpr_32 = COPY [[GLOBAL_LOAD_DWORDX4_55]].sub2
@@ -2796,152 +2794,151 @@ body:             |
   ; CHECK-NEXT:   [[COPY460:%[0-9]+]]:vgpr_32 = COPY [[COPY198]].sub28
   ; CHECK-NEXT:   [[REG_SEQUENCE64:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY460]], %subreg.sub0, [[COPY459]], %subreg.sub1, [[COPY458]], %subreg.sub2, [[COPY457]], %subreg.sub3
   ; CHECK-NEXT:   GLOBAL_STORE_DWORDX4 undef %776:vreg_64, [[REG_SEQUENCE64]], 0, 0, implicit $exec :: (volatile store (s128) into `ptr addrspace(1) undef` + 112, addrspace 1)
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.27, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.27, addrspace 5)
-  ; CHECK-NEXT:   [[COPY461:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE1:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.26, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.26, addrspace 5)
-  ; CHECK-NEXT:   [[COPY462:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE1]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE2:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.25, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.25, addrspace 5)
-  ; CHECK-NEXT:   [[COPY463:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE2]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE3:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.24, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.24, addrspace 5)
-  ; CHECK-NEXT:   [[COPY464:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE3]]
+  ; CHECK-NEXT:   [[COPY461:%[0-9]+]]:vgpr_32 = COPY [[COPY198]].sub27
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.26, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.26, addrspace 5)
+  ; CHECK-NEXT:   [[COPY462:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE1:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.25, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.25, addrspace 5)
+  ; CHECK-NEXT:   [[COPY463:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE1]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE2:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.24, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.24, addrspace 5)
+  ; CHECK-NEXT:   [[COPY464:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE2]]
   ; CHECK-NEXT:   [[REG_SEQUENCE65:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY464]], %subreg.sub0, [[COPY463]], %subreg.sub1, [[COPY462]], %subreg.sub2, [[COPY461]], %subreg.sub3
   ; CHECK-NEXT:   GLOBAL_STORE_DWORDX4 undef %784:vreg_64, [[REG_SEQUENCE65]], 0, 0, implicit $exec :: (volatile store (s128) into `ptr addrspace(1) undef` + 96, align 32, addrspace 1)
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE4:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.23, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.23, addrspace 5)
-  ; CHECK-NEXT:   [[COPY465:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE4]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE5:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.22, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.22, addrspace 5)
-  ; CHECK-NEXT:   [[COPY466:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE5]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE6:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.21, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.21, addrspace 5)
-  ; CHECK-NEXT:   [[COPY467:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE6]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE7:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.20, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.20, addrspace 5)
-  ; CHECK-NEXT:   [[COPY468:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE7]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE3:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.23, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.23, addrspace 5)
+  ; CHECK-NEXT:   [[COPY465:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE3]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE4:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.22, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.22, addrspace 5)
+  ; CHECK-NEXT:   [[COPY466:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE4]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE5:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.21, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.21, addrspace 5)
+  ; CHECK-NEXT:   [[COPY467:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE5]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE6:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.20, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.20, addrspace 5)
+  ; CHECK-NEXT:   [[COPY468:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE6]]
   ; CHECK-NEXT:   [[REG_SEQUENCE66:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY468]], %subreg.sub0, [[COPY467]], %subreg.sub1, [[COPY466]], %subreg.sub2, [[COPY465]], %subreg.sub3
   ; CHECK-NEXT:   GLOBAL_STORE_DWORDX4 undef %792:vreg_64, [[REG_SEQUENCE66]], 0, 0, implicit $exec :: (volatile store (s128) into `ptr addrspace(1) undef` + 80, addrspace 1)
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE8:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.19, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.19, addrspace 5)
-  ; CHECK-NEXT:   [[COPY469:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE8]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE9:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.18, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.18, addrspace 5)
-  ; CHECK-NEXT:   [[COPY470:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE9]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE10:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.17, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.17, addrspace 5)
-  ; CHECK-NEXT:   [[COPY471:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE10]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE11:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.16, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.16, addrspace 5)
-  ; CHECK-NEXT:   [[COPY472:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE11]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE7:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.19, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.19, addrspace 5)
+  ; CHECK-NEXT:   [[COPY469:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE7]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE8:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.18, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.18, addrspace 5)
+  ; CHECK-NEXT:   [[COPY470:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE8]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE9:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.17, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.17, addrspace 5)
+  ; CHECK-NEXT:   [[COPY471:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE9]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE10:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.16, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.16, addrspace 5)
+  ; CHECK-NEXT:   [[COPY472:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE10]]
   ; CHECK-NEXT:   [[REG_SEQUENCE67:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY472]], %subreg.sub0, [[COPY471]], %subreg.sub1, [[COPY470]], %subreg.sub2, [[COPY469]], %subreg.sub3
   ; CHECK-NEXT:   GLOBAL_STORE_DWORDX4 undef %800:vreg_64, [[REG_SEQUENCE67]], 0, 0, implicit $exec :: (volatile store (s128) into `ptr addrspace(1) undef` + 64, align 64, addrspace 1)
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE12:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.15, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.15, addrspace 5)
-  ; CHECK-NEXT:   [[COPY473:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE12]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE13:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.14, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.14, addrspace 5)
-  ; CHECK-NEXT:   [[COPY474:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE13]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE14:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.13, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.13, addrspace 5)
-  ; CHECK-NEXT:   [[COPY475:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE14]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE15:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.12, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.12, addrspace 5)
-  ; CHECK-NEXT:   [[COPY476:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE15]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE11:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.15, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.15, addrspace 5)
+  ; CHECK-NEXT:   [[COPY473:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE11]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE12:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.14, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.14, addrspace 5)
+  ; CHECK-NEXT:   [[COPY474:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE12]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE13:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.13, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.13, addrspace 5)
+  ; CHECK-NEXT:   [[COPY475:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE13]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE14:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.12, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.12, addrspace 5)
+  ; CHECK-NEXT:   [[COPY476:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE14]]
   ; CHECK-NEXT:   [[REG_SEQUENCE68:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY476]], %subreg.sub0, [[COPY475]], %subreg.sub1, [[COPY474]], %subreg.sub2, [[COPY473]], %subreg.sub3
   ; CHECK-NEXT:   GLOBAL_STORE_DWORDX4 undef %808:vreg_64, [[REG_SEQUENCE68]], 0, 0, implicit $exec :: (volatile store (s128) into `ptr addrspace(1) undef` + 48, addrspace 1)
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE16:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.11, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.11, addrspace 5)
-  ; CHECK-NEXT:   [[COPY477:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE16]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE17:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.10, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.10, addrspace 5)
-  ; CHECK-NEXT:   [[COPY478:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE17]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE18:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.9, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.9, addrspace 5)
-  ; CHECK-NEXT:   [[COPY479:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE18]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE19:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.8, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.8, addrspace 5)
-  ; CHECK-NEXT:   [[COPY480:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE19]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE15:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.11, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.11, addrspace 5)
+  ; CHECK-NEXT:   [[COPY477:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE15]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE16:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.10, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.10, addrspace 5)
+  ; CHECK-NEXT:   [[COPY478:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE16]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE17:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.9, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.9, addrspace 5)
+  ; CHECK-NEXT:   [[COPY479:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE17]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE18:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.8, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.8, addrspace 5)
+  ; CHECK-NEXT:   [[COPY480:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE18]]
   ; CHECK-NEXT:   [[REG_SEQUENCE69:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY480]], %subreg.sub0, [[COPY479]], %subreg.sub1, [[COPY478]], %subreg.sub2, [[COPY477]], %subreg.sub3
   ; CHECK-NEXT:   GLOBAL_STORE_DWORDX4 undef %816:vreg_64, [[REG_SEQUENCE69]], 0, 0, implicit $exec :: (volatile store (s128) into `ptr addrspace(1) undef` + 32, align 32, addrspace 1)
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE20:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.7, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.7, addrspace 5)
-  ; CHECK-NEXT:   [[COPY481:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE20]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE21:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.6, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.6, addrspace 5)
-  ; CHECK-NEXT:   [[COPY482:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE21]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE22:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.5, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.5, addrspace 5)
-  ; CHECK-NEXT:   [[COPY483:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE22]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE23:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.4, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.4, addrspace 5)
-  ; CHECK-NEXT:   [[COPY484:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE23]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE19:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.7, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.7, addrspace 5)
+  ; CHECK-NEXT:   [[COPY481:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE19]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE20:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.6, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.6, addrspace 5)
+  ; CHECK-NEXT:   [[COPY482:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE20]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE21:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.5, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.5, addrspace 5)
+  ; CHECK-NEXT:   [[COPY483:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE21]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE22:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.4, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.4, addrspace 5)
+  ; CHECK-NEXT:   [[COPY484:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE22]]
   ; CHECK-NEXT:   [[REG_SEQUENCE70:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY484]], %subreg.sub0, [[COPY483]], %subreg.sub1, [[COPY482]], %subreg.sub2, [[COPY481]], %subreg.sub3
   ; CHECK-NEXT:   GLOBAL_STORE_DWORDX4 undef %824:vreg_64, [[REG_SEQUENCE70]], 0, 0, implicit $exec :: (volatile store (s128) into `ptr addrspace(1) undef` + 16, addrspace 1)
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE24:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.3, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.3, addrspace 5)
-  ; CHECK-NEXT:   [[COPY485:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE24]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE25:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.2, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.2, addrspace 5)
-  ; CHECK-NEXT:   [[COPY486:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE25]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE26:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.1, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.1, addrspace 5)
-  ; CHECK-NEXT:   [[COPY487:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE26]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE27:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.0, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.0, addrspace 5)
-  ; CHECK-NEXT:   [[COPY488:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE27]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE23:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.3, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.3, addrspace 5)
+  ; CHECK-NEXT:   [[COPY485:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE23]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE24:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.2, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.2, addrspace 5)
+  ; CHECK-NEXT:   [[COPY486:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE24]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE25:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.1, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.1, addrspace 5)
+  ; CHECK-NEXT:   [[COPY487:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE25]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE26:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.0, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.0, addrspace 5)
+  ; CHECK-NEXT:   [[COPY488:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE26]]
   ; CHECK-NEXT:   [[REG_SEQUENCE71:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY488]], %subreg.sub0, [[COPY487]], %subreg.sub1, [[COPY486]], %subreg.sub2, [[COPY485]], %subreg.sub3
   ; CHECK-NEXT:   GLOBAL_STORE_DWORDX4 undef %832:vreg_64, [[REG_SEQUENCE71]], 0, 0, implicit $exec :: (volatile store (s128) into `ptr addrspace(1) undef`, align 128, addrspace 1)
   ; CHECK-NEXT:   [[COPY489:%[0-9]+]]:vgpr_32 = COPY [[COPY231]].sub31
   ; CHECK-NEXT:   [[COPY490:%[0-9]+]]:vgpr_32 = COPY [[COPY231]].sub30
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE28:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.57, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.57, addrspace 5)
-  ; CHECK-NEXT:   [[COPY491:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE28]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE29:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.56, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.56, addrspace 5)
-  ; CHECK-NEXT:   [[COPY492:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE29]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE27:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.56, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.56, addrspace 5)
+  ; CHECK-NEXT:   [[COPY491:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE27]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE28:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.55, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.55, addrspace 5)
+  ; CHECK-NEXT:   [[COPY492:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE28]]
   ; CHECK-NEXT:   [[REG_SEQUENCE72:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY492]], %subreg.sub0, [[COPY491]], %subreg.sub1, [[COPY490]], %subreg.sub2, [[COPY489]], %subreg.sub3
   ; CHECK-NEXT:   GLOBAL_STORE_DWORDX4 undef %840:vreg_64, [[REG_SEQUENCE72]], 0, 0, implicit $exec :: (volatile store (s128) into `ptr addrspace(1) undef` + 112, addrspace 1)
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE30:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.55, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.55, addrspace 5)
-  ; CHECK-NEXT:   [[COPY493:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE30]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE31:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.54, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.54, addrspace 5)
-  ; CHECK-NEXT:   [[COPY494:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE31]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE32:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.53, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.53, addrspace 5)
-  ; CHECK-NEXT:   [[COPY495:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE32]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE33:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.52, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.52, addrspace 5)
-  ; CHECK-NEXT:   [[COPY496:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE33]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE29:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.54, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.54, addrspace 5)
+  ; CHECK-NEXT:   [[COPY493:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE29]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE30:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.53, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.53, addrspace 5)
+  ; CHECK-NEXT:   [[COPY494:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE30]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE31:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.52, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.52, addrspace 5)
+  ; CHECK-NEXT:   [[COPY495:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE31]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE32:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.51, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.51, addrspace 5)
+  ; CHECK-NEXT:   [[COPY496:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE32]]
   ; CHECK-NEXT:   [[REG_SEQUENCE73:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY496]], %subreg.sub0, [[COPY495]], %subreg.sub1, [[COPY494]], %subreg.sub2, [[COPY493]], %subreg.sub3
   ; CHECK-NEXT:   GLOBAL_STORE_DWORDX4 undef %848:vreg_64, [[REG_SEQUENCE73]], 0, 0, implicit $exec :: (volatile store (s128) into `ptr addrspace(1) undef` + 96, align 32, addrspace 1)
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE34:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.51, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.51, addrspace 5)
-  ; CHECK-NEXT:   [[COPY497:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE34]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE35:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.50, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.50, addrspace 5)
-  ; CHECK-NEXT:   [[COPY498:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE35]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE36:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.49, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.49, addrspace 5)
-  ; CHECK-NEXT:   [[COPY499:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE36]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE37:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.48, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.48, addrspace 5)
-  ; CHECK-NEXT:   [[COPY500:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE37]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE33:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.50, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.50, addrspace 5)
+  ; CHECK-NEXT:   [[COPY497:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE33]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE34:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.49, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.49, addrspace 5)
+  ; CHECK-NEXT:   [[COPY498:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE34]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE35:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.48, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.48, addrspace 5)
+  ; CHECK-NEXT:   [[COPY499:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE35]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE36:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.47, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.47, addrspace 5)
+  ; CHECK-NEXT:   [[COPY500:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE36]]
   ; CHECK-NEXT:   [[REG_SEQUENCE74:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY500]], %subreg.sub0, [[COPY499]], %subreg.sub1, [[COPY498]], %subreg.sub2, [[COPY497]], %subreg.sub3
   ; CHECK-NEXT:   GLOBAL_STORE_DWORDX4 undef %856:vreg_64, [[REG_SEQUENCE74]], 0, 0, implicit $exec :: (volatile store (s128) into `ptr addrspace(1) undef` + 80, addrspace 1)
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE38:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.47, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.47, addrspace 5)
-  ; CHECK-NEXT:   [[COPY501:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE38]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE39:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.46, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.46, addrspace 5)
-  ; CHECK-NEXT:   [[COPY502:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE39]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE40:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.45, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.45, addrspace 5)
-  ; CHECK-NEXT:   [[COPY503:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE40]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE41:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.44, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.44, addrspace 5)
-  ; CHECK-NEXT:   [[COPY504:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE41]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE37:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.46, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.46, addrspace 5)
+  ; CHECK-NEXT:   [[COPY501:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE37]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE38:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.45, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.45, addrspace 5)
+  ; CHECK-NEXT:   [[COPY502:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE38]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE39:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.44, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.44, addrspace 5)
+  ; CHECK-NEXT:   [[COPY503:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE39]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE40:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.43, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.43, addrspace 5)
+  ; CHECK-NEXT:   [[COPY504:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE40]]
   ; CHECK-NEXT:   [[REG_SEQUENCE75:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY504]], %subreg.sub0, [[COPY503]], %subreg.sub1, [[COPY502]], %subreg.sub2, [[COPY501]], %subreg.sub3
   ; CHECK-NEXT:   GLOBAL_STORE_DWORDX4 undef %864:vreg_64, [[REG_SEQUENCE75]], 0, 0, implicit $exec :: (volatile store (s128) into `ptr addrspace(1) undef` + 64, align 64, addrspace 1)
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE42:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.43, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.43, addrspace 5)
-  ; CHECK-NEXT:   [[COPY505:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE42]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE43:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.42, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.42, addrspace 5)
-  ; CHECK-NEXT:   [[COPY506:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE43]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE44:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.41, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.41, addrspace 5)
-  ; CHECK-NEXT:   [[COPY507:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE44]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE45:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.40, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.40, addrspace 5)
-  ; CHECK-NEXT:   [[COPY508:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE45]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE41:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.42, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.42, addrspace 5)
+  ; CHECK-NEXT:   [[COPY505:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE41]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE42:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.41, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.41, addrspace 5)
+  ; CHECK-NEXT:   [[COPY506:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE42]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE43:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.40, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.40, addrspace 5)
+  ; CHECK-NEXT:   [[COPY507:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE43]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE44:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.39, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.39, addrspace 5)
+  ; CHECK-NEXT:   [[COPY508:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE44]]
   ; CHECK-NEXT:   [[REG_SEQUENCE76:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY508]], %subreg.sub0, [[COPY507]], %subreg.sub1, [[COPY506]], %subreg.sub2, [[COPY505]], %subreg.sub3
   ; CHECK-NEXT:   GLOBAL_STORE_DWORDX4 undef %872:vreg_64, [[REG_SEQUENCE76]], 0, 0, implicit $exec :: (volatile store (s128) into `ptr addrspace(1) undef` + 48, addrspace 1)
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE46:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.39, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.39, addrspace 5)
-  ; CHECK-NEXT:   [[COPY509:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE46]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE47:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.38, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.38, addrspace 5)
-  ; CHECK-NEXT:   [[COPY510:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE47]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE48:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.37, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.37, addrspace 5)
-  ; CHECK-NEXT:   [[COPY511:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE48]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE49:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.36, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.36, addrspace 5)
-  ; CHECK-NEXT:   [[COPY512:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE49]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE45:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.38, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.38, addrspace 5)
+  ; CHECK-NEXT:   [[COPY509:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE45]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE46:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.37, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.37, addrspace 5)
+  ; CHECK-NEXT:   [[COPY510:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE46]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE47:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.36, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.36, addrspace 5)
+  ; CHECK-NEXT:   [[COPY511:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE47]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE48:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.35, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.35, addrspace 5)
+  ; CHECK-NEXT:   [[COPY512:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE48]]
   ; CHECK-NEXT:   [[REG_SEQUENCE77:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY512]], %subreg.sub0, [[COPY511]], %subreg.sub1, [[COPY510]], %subreg.sub2, [[COPY509]], %subreg.sub3
   ; CHECK-NEXT:   GLOBAL_STORE_DWORDX4 undef %880:vreg_64, [[REG_SEQUENCE77]], 0, 0, implicit $exec :: (volatile store (s128) into `ptr addrspace(1) undef` + 32, align 32, addrspace 1)
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE50:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.35, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.35, addrspace 5)
-  ; CHECK-NEXT:   [[COPY513:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE50]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE51:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.34, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.34, addrspace 5)
-  ; CHECK-NEXT:   [[COPY514:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE51]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE52:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.33, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.33, addrspace 5)
-  ; CHECK-NEXT:   [[COPY515:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE52]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE53:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.32, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.32, addrspace 5)
-  ; CHECK-NEXT:   [[COPY516:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE53]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE49:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.34, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.34, addrspace 5)
+  ; CHECK-NEXT:   [[COPY513:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE49]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE50:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.33, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.33, addrspace 5)
+  ; CHECK-NEXT:   [[COPY514:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE50]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE51:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.32, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.32, addrspace 5)
+  ; CHECK-NEXT:   [[COPY515:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE51]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE52:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.31, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.31, addrspace 5)
+  ; CHECK-NEXT:   [[COPY516:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE52]]
   ; CHECK-NEXT:   [[REG_SEQUENCE78:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY516]], %subreg.sub0, [[COPY515]], %subreg.sub1, [[COPY514]], %subreg.sub2, [[COPY513]], %subreg.sub3
   ; CHECK-NEXT:   GLOBAL_STORE_DWORDX4 undef %888:vreg_64, [[REG_SEQUENCE78]], 0, 0, implicit $exec :: (volatile store (s128) into `ptr addrspace(1) undef` + 16, addrspace 1)
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE54:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.31, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.31, addrspace 5)
-  ; CHECK-NEXT:   [[COPY517:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE54]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE55:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.30, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.30, addrspace 5)
-  ; CHECK-NEXT:   [[COPY518:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE55]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE56:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.29, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.29, addrspace 5)
-  ; CHECK-NEXT:   [[COPY519:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE56]]
-  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE57:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.28, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.28, addrspace 5)
-  ; CHECK-NEXT:   [[COPY520:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE57]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE53:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.30, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.30, addrspace 5)
+  ; CHECK-NEXT:   [[COPY517:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE53]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE54:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.29, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.29, addrspace 5)
+  ; CHECK-NEXT:   [[COPY518:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE54]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE55:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.28, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.28, addrspace 5)
+  ; CHECK-NEXT:   [[COPY519:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE55]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE56:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.27, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.27, addrspace 5)
+  ; CHECK-NEXT:   [[COPY520:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE56]]
   ; CHECK-NEXT:   [[REG_SEQUENCE79:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY520]], %subreg.sub0, [[COPY519]], %subreg.sub1, [[COPY518]], %subreg.sub2, [[COPY517]], %subreg.sub3
   ; CHECK-NEXT:   GLOBAL_STORE_DWORDX4 undef %896:vreg_64, [[REG_SEQUENCE79]], 0, 0, implicit $exec :: (volatile store (s128) into `ptr addrspace(1) undef`, align 128, addrspace 1)
   ; CHECK-NEXT:   [[COPY521:%[0-9]+]]:vgpr_32 = COPY [[COPY264]].sub31

@@ -28,7 +28,7 @@
     ret void
   }
 
-  attributes #0 = { "amdgpu-num-vgpr"="5" "target-cpu"="gfx1200" }
+  attributes #0 = { "amdgpu-num-vgpr"="4" "target-cpu"="gfx1200" }
 ...
 ---
 name:            loop_fallback_shift_exit

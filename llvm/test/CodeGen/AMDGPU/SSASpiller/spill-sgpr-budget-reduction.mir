@@ -21,21 +21,23 @@
 #   %s0–%s4:sreg_32          |══|               (def + die in bb.1)
 #   %v0–%v2:vgpr_32          |══|               (def + die in bb.1)
 #
-# Pressure budget:
-#   amdgpu-num-sgpr=8 → SGPR limit = floor(8 * 0.9) = 7
-#   amdgpu-num-vgpr=4 → VGPR limit INITIAL = floor(4 * 0.9) = 3
+# Pressure budget (proportional floor-10% margin: limit = M - M/10):
+#   amdgpu-num-sgpr=7 → getMaxNumSGPRs=5 → SGPR limit = 5 - 0 = 5
+#   amdgpu-num-vgpr=4 → getMaxNumVGPRs=4 → VGPR limit INITIAL = 4 - 0 = 4
 #
-# Pass 1 (SGPR): at %s5 def — %s_far + %s0–%s4 = 6 > 5 → %s_far spilled.
-#   countSGPRSpillVGPRs() = 1 lane slot → VGPRLimit decremented: 3 → 2.
+# Pass 1 (SGPR): %s_far + %s0–%s4 = 6 > 5 → %s_far spilled.
+#   countSGPRSpillVGPRs() = 1 lane slot. The lane needs a physical VGPR; the
+#   margin reserved none (getMaxNumVGPRs/10 = 0), so VGPRLimit is decremented
+#   by the shortfall: 4 → 3.
 #
-# Pass 2 (VGPR): limit is now 2 (not 3). At %v2 def — %v_far + %v0–%v2 = 4 > 2.
-#   Both %v_far and %v1 are spilled.
-#   WITHOUT the SGPR lane reservation, VGPR limit would be 3 and only ONE VGPR
-#   spill (or none) would be needed. The extra spill is caused solely by the SGPR
-#   lane VGPR consuming one slot from the VGPR budget.
+# Pass 2 (VGPR): limit is now 3 (not 4). %v_far + %v0–%v2 = 4 > 3 → %v_far spilled.
+#   WITHOUT the SGPR lane reservation the VGPR limit would be 4 and NO VGPR spill
+#   would occur. The single VGPR spill is caused solely by the SGPR lane VGPR
+#   consuming one slot from the VGPR budget.
 #
 # This test proves that countSGPRSpillVGPRs() correctly reduces the VGPR budget
-# before Pass 2, ensuring the spiller does not over-allocate VGPRs.
+# before Pass 2 (crediting any margin already held back), ensuring the spiller
+# does not over-allocate VGPRs.
 
 --- |
   target triple = "amdgcn-amd-amdhsa"
@@ -47,7 +49,7 @@
   use:
     ret void
   }
-  attributes #0 = { "amdgpu-num-sgpr"="8" "amdgpu-num-vgpr"="4" "target-cpu"="gfx1200" }
+  attributes #0 = { "amdgpu-num-sgpr"="7" "amdgpu-num-vgpr"="4" "target-cpu"="gfx1200" }
 ...
 ---
 name:            sgpr_budget_reduction
@@ -58,32 +60,31 @@ frameInfo:
 machineFunctionInfo:
   stackPtrOffsetReg: '$sgpr32'
 body: |
-  ; === Stage 1: Spiller — one SI_SPILL_S32 (SGPR) and two SI_SPILL_V32 (VGPR) ===
-  ; The SGPR spill triggers VGPR budget reduction; two VGPRs must then be spilled.
+  ; === Stage 1: Spiller — one SI_SPILL_S32 (SGPR) and one SI_SPILL_V32 (VGPR) ===
+  ; The SGPR spill reserves one VGPR lane, dropping the VGPR limit 4 -> 3, which
+  ; forces exactly one VGPR spill (%v_far). No spill is needed in bb.1.pressure.
   ; AFTER-SPILL-LABEL: name: sgpr_budget_reduction
   ; AFTER-SPILL:         SI_SPILL_S32_SAVE %{{.*}}, %stack.0, implicit $exec, implicit $sgpr32
   ; AFTER-SPILL:         SI_SPILL_V32_SAVE %{{.*}}, %stack.1, $sgpr32, 0, implicit $exec
   ; AFTER-SPILL:       bb.1.pressure:
-  ; AFTER-SPILL:         SI_SPILL_V32_SAVE %{{.*}}, %stack.2, $sgpr32, 0, implicit $exec
+  ; AFTER-SPILL-NOT:     SI_SPILL_V32_SAVE
 
-  ; === Stage 2: After SSA RA — physregs, three spill pseudos survive ===
+  ; === Stage 2: After SSA RA — physregs, two spill pseudos survive ===
   ; AFTER-RA-LABEL: name: sgpr_budget_reduction
   ; AFTER-RA:         $sgpr0 = S_MOV_B32 100
   ; AFTER-RA-NEXT:    SI_SPILL_S32_SAVE $sgpr0, %stack.0, implicit $exec, implicit $sgpr32
   ; AFTER-RA:         SI_SPILL_V32_SAVE $vgpr0, %stack.1, $sgpr32, 0, implicit $exec
   ; AFTER-RA:       bb.1.pressure:
-  ; AFTER-RA:         SI_SPILL_V32_SAVE $vgpr1, %stack.2, $sgpr32, 0, implicit $exec
+  ; AFTER-RA-NOT:    SI_SPILL_V32_SAVE
 
-  ; === Stage 3: After SILowerSGPRSpills — SGPR pseudo → writelane; VGPR pseudos stay ===
+  ; === Stage 3: After SILowerSGPRSpills — SGPR pseudo → writelane; VGPR pseudo stays ===
   ; The SGPR spill is materialised to SI_SPILL_S32_TO_VGPR (one lane VGPR).
-  ; The two VGPR spills remain as SI_SPILL_V32_SAVE (lowered by PEI, not here).
+  ; The single VGPR spill remains as SI_SPILL_V32_SAVE (lowered by PEI, not here).
   ; AFTER-LOWER-LABEL: name: sgpr_budget_reduction
   ; AFTER-LOWER:         $sgpr0 = S_MOV_B32 100
   ; AFTER-LOWER-NEXT:    %[[LANE:[0-9a-z_]+]]:vgpr_32 = IMPLICIT_DEF
   ; AFTER-LOWER-NEXT:    %[[LANE]]:vgpr_32 = SI_SPILL_S32_TO_VGPR $sgpr0, 0, %[[LANE]]
   ; AFTER-LOWER:         SI_SPILL_V32_SAVE $vgpr0, %stack.1, $sgpr32, 0, implicit $exec
-  ; AFTER-LOWER:       bb.1.pressure:
-  ; AFTER-LOWER:         SI_SPILL_V32_SAVE $vgpr1, %stack.2, $sgpr32, 0, implicit $exec
   ; AFTER-LOWER:       bb.2.use:
   ; AFTER-LOWER:         $sgpr0 = SI_RESTORE_S32_FROM_VGPR %[[LANE]], 0
   ; AFTER-LOWER:         SI_SPILL_V32_RESTORE %stack.1, $sgpr32, 0, implicit $exec
