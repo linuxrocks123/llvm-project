@@ -48,18 +48,19 @@ class AMDGPURebuildSSALegacy : public MachineFunctionPass {
     return LI.getVNInfoBefore(EndB);
   }
 
-  bool reachedByThisVNI(LiveInterval &LI, MachineInstr *DefMI,
-                        MachineInstr *UseMI, MachineOperand &UseOp,
-                        VNInfo *VNI) {
+  bool reachedByThisVNI(LiveInterval &LI, MachineInstr *UseMI,
+                        MachineOperand &UseOp, VNInfo *VNI) {
+    // PHI operands read at the end of the corresponding predecessor edge.
     if (UseMI->isPHI())
       return incomingOnEdge(LI, UseMI, UseOp) == VNI;
-
-    if (UseMI->getParent() == DefMI->getParent()) {
-      SlotIndex DefIdx = LIS->getInstructionIndex(*DefMI);
-      SlotIndex UseIdx = LIS->getInstructionIndex(*UseMI);
-      return DefIdx < UseIdx;
-    }
-    return MDT->dominates(DefMI->getParent(), UseMI->getParent());
+    // Every other use reads whatever value is live immediately before it.
+    // Querying the live interval is exact: it accounts for redefinitions of
+    // the same vreg between the def and this use, both within a block and
+    // across blocks, which the old DefIdx<UseIdx / dominance heuristics did
+    // not — those wrongly attributed a post-redef use to an earlier value
+    // (e.g. an induction var: PHI -> S_ADD redef -> S_CMP use).
+    SlotIndex UseIdx = LIS->getInstructionIndex(*UseMI).getRegSlot();
+    return LI.getVNInfoBefore(UseIdx) == VNI;
   }
 
   LaneBitmask operandLaneMask(const MachineOperand &MO) const {
@@ -299,7 +300,7 @@ void AMDGPURebuildSSALegacy::rewriteUses(MachineInstr *DefMI, Register OldVR,
     if (UseMI == DefMI)
       continue;
 
-    if (!reachedByThisVNI(LI, DefMI, UseMI, MO, VNI))
+    if (!reachedByThisVNI(LI, UseMI, MO, VNI))
       continue;
 
     LaneBitmask OpMask = operandLaneMask(MO);
