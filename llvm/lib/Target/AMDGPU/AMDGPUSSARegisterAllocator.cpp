@@ -431,6 +431,14 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
         MCRegister SrcPhys = ColorMap.lookup(SrcVReg);
         assert(SrcPhys && "PHI source not colored");
 
+        // A PHI source may name a subregister (e.g. %x.sub0). The copy must
+        // move the corresponding sub-physreg, not the full tuple, otherwise we
+        // emit an illegal width-mismatched copy.
+        if (unsigned SubIdx = MI.getOperand(I).getSubReg()) {
+          SrcPhys = TRI->getSubReg(SrcPhys, SubIdx);
+          assert(SrcPhys && "Invalid subreg index on PHI source");
+        }
+
         if (SrcPhys != DstPhys)
           PredCopies[Pred].push_back({SrcPhys, DstPhys});
       }
