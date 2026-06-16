@@ -67,8 +67,7 @@ class AMDGPUSSARegisterAllocator : public MachineFunctionPass {
   void lowerPHIs(MachineFunction &MF);
   void resolvePermutation(MachineBasicBlock &MBB,
                           MachineBasicBlock::iterator InsertPt,
-                          SmallVectorImpl<std::pair<MCRegister, MCRegister>> &Copies,
-                          bool IsVGPR);
+                          SmallVectorImpl<std::pair<MCRegister, MCRegister>> &Copies);
   void emitSwap(MachineBasicBlock &MBB, MachineBasicBlock::iterator InsertPt,
                 MCRegister RegA, MCRegister RegB);
   void rewriteOperands(MachineFunction &MF);

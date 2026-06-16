@@ -279,7 +279,7 @@ void AMDGPUSSARegisterAllocator::emitSwap(
 
 void AMDGPUSSARegisterAllocator::resolvePermutation(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator InsertPt,
-    SmallVectorImpl<std::pair<MCRegister, MCRegister>> &Copies, bool IsVGPR) {
+    SmallVectorImpl<std::pair<MCRegister, MCRegister>> &Copies) {
   if (Copies.empty())
     return;
 
@@ -310,19 +310,24 @@ void AMDGPUSSARegisterAllocator::resolvePermutation(
   }
 
   // Phase 2: all remaining entries form cycles (chains were drained above).
-  unsigned &MaxIdx = IsVGPR ? MaxVGPRIdx : MaxSGPRIdx;
+  // A permutation cycle is always confined to one register file — a VGPR
+  // destination can never equal an SGPR source — so the file (and thus the
+  // scratch counter, HW limit, occupancy model and swap lowering) is derived
+  // per cycle from its own registers, never from a block-wide assumption.
   const MachineFunction &MF = *MBB.getParent();
-  unsigned MaxHWLimit = IsVGPR
-      ? ST->getMaxNumVGPRs(MF)
-      : ST->getMaxNumSGPRs(MF);
-  unsigned CurrentOcc = IsVGPR
-      ? ST->getOccupancyWithNumVGPRs(MaxIdx, DynVGPRBlockSize)
-      : ST->getOccupancyWithNumSGPRs(MaxIdx);
 
   while (!DstToSrc.empty()) {
     // Pick any entry as cycle start — all remaining entries form disjoint
     // cycles, and the walk traces the full cycle regardless of entry point.
     MCRegister CycleStart = DstToSrc.begin()->first;
+
+    bool IsVGPR = TRI->isVGPRClass(TRI->getPhysRegBaseClass(CycleStart));
+    unsigned &MaxIdx = IsVGPR ? MaxVGPRIdx : MaxSGPRIdx;
+    unsigned MaxHWLimit =
+        IsVGPR ? ST->getMaxNumVGPRs(MF) : ST->getMaxNumSGPRs(MF);
+    unsigned CurrentOcc =
+        IsVGPR ? ST->getOccupancyWithNumVGPRs(MaxIdx, DynVGPRBlockSize)
+               : ST->getOccupancyWithNumSGPRs(MaxIdx);
 
     // Tier 1: scratch register if it doesn't reduce occupancy.
     // Scratch must match the cycle's register width.
@@ -341,8 +346,6 @@ void AMDGPUSSARegisterAllocator::resolvePermutation(
           : TRI->getMatchingSuperReg(ScratchBase, AMDGPU::sub0,
                 TRI->getPhysRegBaseClass(CycleStart));
       MaxIdx += CycleWidth;
-
-      CurrentOcc = ScratchOcc;
 
       LLVM_DEBUG(dbgs() << "    cycle via scratch "
                         << TRI->getName(Scratch) << ":\n");
@@ -408,10 +411,6 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
              SmallVector<std::pair<MCRegister, MCRegister>>>
         PredCopies;
 
-    // All PHIs in one block share the same register file.
-    Register FirstDst = MBB.front().getOperand(0).getReg();
-    bool IsVGPR = TRI->isVGPRClass(MRI->getRegClass(FirstDst));
-
     for (MachineInstr &MI : MBB) {
       if (!MI.isPHI())
         break;
@@ -453,7 +452,7 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
       LLVM_DEBUG(dbgs() << "  Edge " << printMBBReference(*InsertMBB) << " -> "
                         << printMBBReference(MBB) << ":\n");
       auto InsertPt = InsertMBB->getFirstTerminator();
-      resolvePermutation(*InsertMBB, InsertPt, Copies, IsVGPR);
+      resolvePermutation(*InsertMBB, InsertPt, Copies);
     }
   }
 
