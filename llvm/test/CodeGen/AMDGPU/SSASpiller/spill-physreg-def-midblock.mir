@@ -5,15 +5,17 @@
 #       After physreg dies, pressure drops → no more spills.
 #
 # Live ranges:
-#        MOV  MOV  MOV  MOV  NOP  MOV  ENDPGM
-# %a      |====|====|====|====|====|====|
-# %b           |====|====|====|====|====|
+#        MOV  MOV  MOV  MOV  NOP   MOV  NOP   ENDPGM
+# %a      |====|====|====|====|====|====|====|
+# %b           |====|====|====|====|====|====|
 # $vgpr0            |====|====|
-# %c                     |====|====|====|
+# %c                     |====|====|====|====|
 # %d                                |====|
 #
-# amdgpu-num-vgpr=4, limit=3. Physreg def pushes total to 4 → spill.
-# After physreg death, %d fits within limit → no second spill.
+# amdgpu-num-vgpr=3, limit=3. The mid-block physreg def ($vgpr0) coexists with
+# %a,%b,%c, pushing the peak to 4 → one spill. After $vgpr0 dies, %d is defined
+# and fits within the limit → no second spill. %d is consumed by S_NOP (not kept
+# live to the end), so at most 3 values (%a,%b,%c) are live at S_ENDPGM.
 #
 # CHECK-LABEL: name: physreg_def_midblock
 # CHECK: SI_SPILL_V32_SAVE
@@ -48,5 +50,6 @@ body: |
     %c:vgpr_32 = V_MOV_B32_e32 3, implicit $exec
     S_NOP 0, implicit $vgpr0
     %d:vgpr_32 = V_MOV_B32_e32 4, implicit $exec
-    S_ENDPGM 0, implicit %a, implicit %b, implicit %c, implicit %d
+    S_NOP 0, implicit %d
+    S_ENDPGM 0, implicit %a, implicit %b, implicit %c
 ...

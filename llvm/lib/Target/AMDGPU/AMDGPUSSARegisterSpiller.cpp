@@ -209,11 +209,20 @@ void AMDGPUSSARegisterSpiller::validateFinalRegisterPressure(
       if (isSpillInstr(&MI) || isReloadInstr(&MI))
         continue;
       
-      // Reset tracker to compute pressure at this instruction
+      // Validate against the same peak (read/write phase) metric the spiller
+      // targets; the after-instruction live set alone underestimates pressure
+      // when operands die in place. A PHI is excluded: its operands are not
+      // read at the PHI (the sources are live out of the predecessors and moved
+      // by edge copies during SSA destruction), so its pressure is the
+      // block-entry live set, not a read peak.
       RPTracker->reset(MI);
-      
-      // Get current pressure
-      GCNRegPressure CurPressure = RPTracker->getPressure();
+      GCNRegPressure CurPressure;
+      if (MI.isPHI()) {
+        CurPressure = RPTracker->getPressure();
+      } else {
+        RPTracker->recede(MI);
+        CurPressure = RPTracker->getMaxPressure();
+      }
       const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
       unsigned CurRP = IsVGPR ? CurPressure.getVGPRNum(ST.hasGFX90AInsts())
                               : CurPressure.getSGPRNum();
@@ -338,12 +347,30 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
       }
       LivePhysRP += PhysDefs;
 
-      // Reset tracker to this instruction - it will compute what's live here
-      // by analyzing backward from this point
+      // An instruction's register pressure is its peak simultaneous demand:
+      // the maximum of the read phase (all uses + values live across it) and
+      // the write phase (all defs + values live across it). The live set after
+      // the instruction is not enough — when operands die in place, a
+      // multi-input or early-clobber instruction can require more registers
+      // while executing than remain live once it has finished.
+      //
+      // reset(MI) seeds the tracker with the live set just after MI; recede(MI)
+      // moves back across MI, folding in both phases (early-clobber aware) so
+      // the peak lands in getMaxPressure(). The per-instruction reset re-seeds
+      // the otherwise-running MaxPressure, scoping it to this instruction.
+      //
+      // A PHI has no read phase: its operands are not read here — the source
+      // values are live out of the predecessors and moved by copies on the
+      // edges during SSA destruction. Its pressure is the block-entry live set,
+      // so use the post-instruction set directly (no recede).
       RPTracker->reset(MI);
-
-      // Get current register pressure at this point
-      GCNRegPressure CurPressure = RPTracker->getPressure();
+      GCNRegPressure CurPressure;
+      if (MI.isPHI()) {
+        CurPressure = RPTracker->getPressure();
+      } else {
+        RPTracker->recede(MI);
+        CurPressure = RPTracker->getMaxPressure();
+      }
       
       // Get pressure for the current pass using the appropriate API
       const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
@@ -435,84 +462,43 @@ void AMDGPUSSARegisterSpiller::sortRegSetByNextUse(
   // Get the current instruction
   MachineInstr *MI = &(*I);
   
-  // IMPORTANT: Query next-use distance AFTER current instruction executes
-  // Example: X = ADD Y, Z
-  //   At this instruction, Y and Z are inputs (used here)
-  //   But AFTER this instruction, if Y and Z are dead, we can spill them to make room for X
-  // 
-  // reverse_iterator semantics: I.getReverse() points to position AFTER *I in forward order
-  // So we query at I.getReverse() to get "next use after current instruction"
-  //
-  // Exception: For early-clobber DEFs (e.g., %X:early-clobber = OP %Y, %Z),
-  // the output %X is written BEFORE inputs %Y, %Z are read.
-  // Therefore, we CANNOT spill %Y or %Z to make room (they conflict).
-  // Algorithm:
-  //   1. Check if instruction has early-clobber DEF
-  //   2. Collect USE operands (inputs that conflict with early-clobber output)
-  //   3. Query all registers at NEXT position
-  //   4. Mark conflicting USEs as distance 0 (cannot spill)
-  // Note: DEF operands are NOT in Active set yet, so they'll never be candidates.
-  
-  // CRITICAL: I is reverse_iterator pointing to instruction A.
-  // We want to query AFTER instruction A executes.
-  // I.getReverse() returns I.base() which empirically points to instruction A itself.
-  // To query AFTER instruction A, we need std::next(I.getReverse()).
-  // BUT: std::next() might reach MBB.end(), which cannot be dereferenced.
-  MachineBasicBlock::iterator AfterCurrent = std::next(I.getReverse());
-  bool AtBlockEnd = (AfterCurrent == MBB.end());
-  
-  // Step 1: Check if instruction has early-clobber DEF
-  bool HasEarlyClobber = false;
-  for (const MachineOperand &MO : MI->operands()) {
-    if (MO.isReg() && MO.isDef() && MO.isEarlyClobber()) {
-      HasEarlyClobber = true;
-      break;
-    }
+  // Rank spill candidates by next-use distance measured at MI's slot. The lanes
+  // an instruction reads cannot be freed at that instruction — if spilled they
+  // would be reloaded right before it — so they are subtracted from each
+  // candidate, and only the remaining lanes (those live across MI) are ranked.
+  // Working at lane granularity keeps a sub-register spillable when a sibling
+  // lane of the same tuple is read here (e.g. %x.sub1 stays a candidate while
+  // %x.sub0 is read by MI). This also subsumes the former early-clobber special
+  // case: an early-clobber use is just a read here, and recede() already
+  // accounts for early-clobber in the pressure metric. Defs never appear in
+  // Active (SSA defs are whole-register and excluded earlier), so only reads are
+  // subtracted.
+  MachineBasicBlock::iterator MIIter = MI->getIterator();
+
+  // Lanes read by MI, per virtual register.
+  DenseMap<Register, LaneBitmask> UsedLanes;
+  for (const MachineOperand &MO : MI->operands())
+    if (MO.isReg() && MO.isUse() && MO.getReg().isVirtual())
+      UsedLanes[MO.getReg()] |= VRegMaskPair(MO, TRI, MRI).getLaneMask();
+
+  // Restrict each candidate to the lanes NOT read by MI; drop any fully consumed
+  // here. Rebuild Active so downstream spilling operates on exactly the spillable
+  // lanes.
+  SmallVector<VRegMaskPair, 8> Candidates;
+  for (const VRegMaskPair &VMP : Active) {
+    LaneBitmask CandMask = VMP.getLaneMask();
+    auto It = UsedLanes.find(VMP.getVReg());
+    if (It != UsedLanes.end())
+      CandMask &= ~It->second;
+    if (CandMask.none())
+      continue;
+    Candidates.emplace_back(VMP.getVReg(), CandMask);
   }
-  
-  // Step 2: Collect USE operands (inputs) that conflict with early-clobber output
-  VRegMaskPairSet EarlyClobberConflictingUses;
-  if (HasEarlyClobber) {
-    LLVM_DEBUG(dbgs() << "sortRegSetByNextUse: Early-clobber detected\n");
-    for (const MachineOperand &MO : MI->operands()) {
-      if (MO.isReg() && MO.isUse() && MO.getReg().isVirtual()) {
-        VRegMaskPair VMP(MO, TRI, MRI);
-        EarlyClobberConflictingUses.insert(VMP);
-        
-        LLVM_DEBUG(dbgs() << "  Conflicting USE: " << printReg(VMP.getVReg(), TRI);
-                   if (MO.getSubReg())
-                     dbgs() << "." << TRI->getSubRegIndexName(MO.getSubReg());
-                   dbgs() << " (lanes: " << PrintLaneMask(VMP.getLaneMask()) << ")\n");
-      }
-    }
-  }
-  
-  // Step 3: Calculate distance for each register
-  for (const auto &VMP : Active) {
-    unsigned Dist;
-    
-    // If at block end, use block-level query (checks successors)
-    // Otherwise, query at the next instruction
-    if (AtBlockEnd) {
-      Dist = NU->getNextUseDistance(MBB, VMP);
-    } else {
-      Dist = NU->getNextUseDistance(AfterCurrent, VMP);
-    }
-    
-    // Step 4: Mark early-clobber-conflicting USEs as cannot spill
-    if (HasEarlyClobber) {
-      LaneCoverageResult Coverage = EarlyClobberConflictingUses.getCoverage(VMP);
-      if (!Coverage.isFullyUncovered()) {
-        // This VMP overlaps with early-clobber USE operand(s), cannot spill
-        Dist = 0; // Cannot spill (conflicts with early-clobber output)
-        LLVM_DEBUG(dbgs() << "  " << printReg(VMP.getVReg(), TRI) 
-                          << " (mask " << PrintLaneMask(VMP.getLaneMask()) << ")"
-                          << " conflicts with early-clobber (covered: " 
-                          << PrintLaneMask(Coverage.getCovered()) << "), dist=0\n");
-      }
-    }
-    
-    DistanceMap[VMP] = Dist;
+
+  Active.clear();
+  for (const VRegMaskPair &VMP : Candidates) {
+    Active.insert(VMP);
+    DistanceMap[VMP] = NU->getNextUseDistance(MIIter, VMP);
   }
   
   // Sort using pre-computed distances
@@ -536,11 +522,8 @@ void AMDGPUSSARegisterSpiller::sortRegSetByNextUse(
   
   LLVM_DEBUG({
     dbgs() << "sortRegSetByNextUse: Active set sorted at " << *MI;
-    dbgs() << " (query position: after instruction";
-    if (HasEarlyClobber)
-      dbgs() << ", USE operands blocked from spilling";
-    dbgs() << ")\n";
-    
+    dbgs() << " (read lanes excluded, ranked by next use at MI)\n";
+
     for (const auto &VMP : Active) {
       Register VReg = VMP.getVReg();
       StringRef Name = MRI->getVRegName(VReg);
@@ -549,15 +532,7 @@ void AMDGPUSSARegisterSpiller::sortRegSetByNextUse(
       else
         dbgs() << "  " << printReg(VReg, TRI);
       dbgs() << " (mask " << PrintLaneMask(VMP.getLaneMask()) 
-             << ") : " << DistanceMap[VMP];
-      
-      // Mark if this is a USE that conflicts with early-clobber
-      if (HasEarlyClobber) {
-        LaneCoverageResult Coverage = EarlyClobberConflictingUses.getCoverage(VMP);
-        if (!Coverage.isFullyUncovered())
-          dbgs() << " [blocked by early-clobber]";
-      }
-      dbgs() << "\n";
+             << ") : " << DistanceMap[VMP] << "\n";
     }
   });
 }

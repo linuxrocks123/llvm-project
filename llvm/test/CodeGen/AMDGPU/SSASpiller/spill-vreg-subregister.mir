@@ -143,8 +143,10 @@ body:             |
   ; CHECK-NEXT:   successors: %bb.2(0x80000000)
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT:   [[V_ADD_U32_e32_2:%[0-9]+]]:vgpr_32 = V_ADD_U32_e32 [[S_LOAD_DWORD_IMM]], [[GLOBAL_LOAD_DWORDX4_SADDR]].sub1, implicit $exec
+  ; CHECK-NEXT:   SI_SPILL_V32_SAVE [[V_ADD_U32_e32_2]], %stack.2, $sgpr32, 0, implicit $exec :: (store (s32) into %stack.2, addrspace 5)
   ; CHECK-NEXT:   [[COPY4:%[0-9]+]]:vreg_128 = COPY [[GLOBAL_LOAD_DWORDX4_SADDR]]
-  ; CHECK-NEXT:   [[COPY5:%[0-9]+]]:vgpr_32 = COPY [[V_ADD_U32_e32_2]]
+  ; CHECK-NEXT:   [[SI_SPILL_V32_RESTORE1:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE %stack.2, $sgpr32, 0, implicit $exec :: (load (s32) from %stack.2, addrspace 5)
+  ; CHECK-NEXT:   [[COPY5:%[0-9]+]]:vgpr_32 = COPY [[SI_SPILL_V32_RESTORE1]]
   ; CHECK-NEXT:   [[S_MOV_B64_1:%[0-9]+]]:sreg_64_xexec = S_MOV_B64 0
   ; CHECK-NEXT:   [[REG_SEQUENCE2:%[0-9]+]]:vreg_128 = REG_SEQUENCE [[COPY4]].sub0, %subreg.sub0, [[COPY4]].sub1, %subreg.sub1, [[COPY4]].sub3, %subreg.sub3, [[COPY5]], %subreg.sub2
   ; CHECK-NEXT:   S_BRANCH %bb.2
