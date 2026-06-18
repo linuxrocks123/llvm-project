@@ -1,14 +1,7 @@
 ; RUN: llc -mtriple=amdgcn -mcpu=gfx900 -amdgpu-ssa-regalloc -verify-machineinstrs < %s | FileCheck %s
 ;
 ; End-to-end SSA RA pipeline test (T3c): 128-bit vector load/store (vreg_128).
-;
-; XFAIL: *
-; REQUIRES: asserts
-; Known failure: the machine verifier reports "Using an undefined physical
-; register". Root cause is RebuildSSA's lane-blind reconstruction emitting a
-; partial wide def (undef %r.subN:vreg_128) for tuple values (see NOTES
-; 2026-06-18). Fixed by the MachineLaneSSAUpdater refactor (Phase 1); flip this
-; to a real CHECK once that lands.
+; Verifies the 4-wide store is emitted correctly through the full SSA RA pipeline.
 
 define amdgpu_kernel void @pipeline_wide_v128(ptr addrspace(1) %out, ptr addrspace(1) %in) {
   %tid = call i32 @llvm.amdgcn.workitem.id.x()

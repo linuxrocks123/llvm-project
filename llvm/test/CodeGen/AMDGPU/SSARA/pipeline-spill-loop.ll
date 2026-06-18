@@ -1,16 +1,9 @@
 ; RUN: llc -mtriple=amdgcn -mcpu=gfx900 -amdgpu-ssa-regalloc -verify-machineinstrs < %s | FileCheck %s
+; RUN: llc -mtriple=amdgcn -mcpu=gfx900 -amdgpu-ssa-regalloc -stop-after=amdgpu-ssa-register-spiller -amdgpu-ssa-spill-markers=1 < %s | FileCheck --check-prefix=SPILLER %s
 ;
-; End-to-end SSA RA pipeline test (T2c): loop carrying divergent loop-invariant
-; values across the body under a tight VGPR budget (loop + back-edge + spill).
-;
-; XFAIL: *
-; REQUIRES: asserts
-; Known failure: SSA RA color() aborts ("Failed to find free physreg") on a
-; budget greedy fits without spilling. RebuildSSA legalizes in-place subregister
-; defs into a partial wide def (undef %r.sub0:vreg_64) that costs a full tuple
-; for a single lane, inflating loop pressure past the budget (see NOTES
-; 2026-06-18). Fixed by the MachineLaneSSAUpdater refactor (Phase 1); flip this
-; to a real CHECK once that lands.
+; End-to-end SSA RA pipeline test (T2c): loop with a spilled loop-invariant
+; value. The precomputed scalar sum exceeds the VGPR budget (amdgpu-num-vgpr=5)
+; and is spilled before the loop, reloaded on every iteration.
 
 define amdgpu_kernel void @pipeline_spill_loop(ptr addrspace(1) %out, ptr addrspace(1) %in, i32 %n) #0 {
 entry:
@@ -45,7 +38,13 @@ exit:
 }
 
 declare i32 @llvm.amdgcn.workitem.id.x()
-attributes #0 = { "amdgpu-num-vgpr"="6" }
+attributes #0 = { "amdgpu-num-vgpr"="5" }
 
 ; CHECK-LABEL: pipeline_spill_loop:
+; CHECK: buffer_store_dword
+; CHECK: buffer_load_dword
 ; CHECK: global_store_dword
+
+; SPILLER-LABEL: name: pipeline_spill_loop
+; SPILLER: SI_SPILL_V32_SAVE
+; SPILLER: SI_VIRTUAL_SPILL_MARKER

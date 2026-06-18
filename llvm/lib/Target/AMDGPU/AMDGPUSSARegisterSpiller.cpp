@@ -1203,7 +1203,18 @@ void AMDGPUSSARegisterSpiller::fixPathologicalPHIs(VRegMaskPair SpilledVMP,
     MachineBasicBlock *PHIBB = PHI->getParent();
     
     LLVM_DEBUG(dbgs() << "  Replacing PHI: " << *PHI);
-    
+
+    // If the PHI result is unused, SSA repair already rewrote all dominated
+    // uses to a closer definition (e.g. a reload placed just before the use).
+    // Inserting a restore here would be dead code and consume a register slot
+    // that causes the colorer to exceed the pressure limit. Delete silently.
+    if (MRI->use_nodbg_empty(PHIDest)) {
+      LLVM_DEBUG(dbgs() << "    PHI result unused, deleting dead PHI\n");
+      Indexes->removeMachineInstrFromMaps(*PHI);
+      PHI->eraseFromParent();
+      continue;
+    }
+
     // Get the register class from the PHI destination
     const TargetRegisterClass *RC = MRI->getRegClass(PHIDest);
     
