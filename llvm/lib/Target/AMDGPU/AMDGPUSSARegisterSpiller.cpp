@@ -41,6 +41,13 @@ static cl::opt<bool> DisableReloadOptimizer(
     cl::desc("Disable reload optimizer in SSA spiller"),
     cl::init(false), cl::Hidden);
 
+// ============================================================================
+static cl::opt<cl::boolOrDefault> VerifyFinalRP(
+    "amdgpu-ssa-spiller-verify-rp",
+    cl::desc("Verify final register pressure stays within the limit after SSA "
+             "spilling (default: on in expensive-checks builds)"),
+    cl::Hidden);
+
 // Helper function to identify spill instructions
 // ============================================================================
 
@@ -446,8 +453,17 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
     }
   }
   
-  // TEMPORARY: Validate final RP after all spilling is complete
-  validateFinalRegisterPressure(MF, RPLimit, IsVGPRPass);
+  // Verify the spiller kept register pressure within the limit at every
+  // instruction. This re-walks the function (O(n)); it runs when explicitly
+  // requested (-amdgpu-ssa-spiller-verify-rp) and by default in expensive-checks
+  // builds.
+  bool DoVerifyRP = VerifyFinalRP == cl::BOU_TRUE;
+#ifdef EXPENSIVE_CHECKS
+  if (VerifyFinalRP == cl::BOU_UNSET)
+    DoVerifyRP = true;
+#endif
+  if (DoVerifyRP)
+    validateFinalRegisterPressure(MF, RPLimit, IsVGPRPass);
   
   return Changed;
 }
