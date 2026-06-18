@@ -70,12 +70,23 @@ MCRegister AMDGPUSSARegisterAllocator::pickFreePhysReg(
     dbgs() << "\n";
   });
 
-  // Augment OccupiedRegUnits with physregs of any wider-width vreg assigned
-  // in this block whose live interval overlaps VI. WiderDefs is tiny (bounded
-  // by the number of wider-width defs in this MBB) — no ColorMap scan needed.
+  // Augment OccupiedRegUnits with wider-width assignments that overlap VI.
+  // Two sources: (1) WiderDefs — wider defs in THIS block not yet live at
+  // BBStart (O(k), k = wider defs in block); (2) ColorMap scan for wider
+  // cross-block entries (O(|ColorMap|), but only in narrower width passes
+  // after wider passes committed their assignments).
+  unsigned VIWidth = TRI->getRegSizeInBits(*RC);
   BitVector OccupiedAtDef = OccupiedRegUnits;
   for (const auto &[WPhysReg, WLI] : WiderDefs) {
     if (WLI->overlaps(VI)) {
+      for (MCRegUnit Unit : TRI->regunits(WPhysReg))
+        OccupiedAtDef.set(Unit);
+    }
+  }
+  for (const auto &[WReg, WPhysReg] : ColorMap) {
+    if (TRI->getRegSizeInBits(*MRI->getRegClass(WReg)) <= VIWidth)
+      continue;
+    if (LIS->getInterval(WReg).overlaps(VI)) {
       for (MCRegUnit Unit : TRI->regunits(WPhysReg))
         OccupiedAtDef.set(Unit);
     }
@@ -120,22 +131,36 @@ void AMDGPUSSARegisterAllocator::color() {
     dbgs() << "\n";
   });
 
-  // Process one MBB at a time across ALL width passes. This lets us maintain
-  // a tiny per-MBB WiderDefs accumulator that records physreg assignments made
-  // in THIS block by wider (already-completed) passes. Narrower passes consult
-  // WiderDefs in pickFreePhysReg to catch cross-width interference from vregs
-  // defined mid-block — without scanning ColorMap at every def site.
-  for (auto *Node : depth_first(MDT->getRootNode())) {
-    MachineBasicBlock *MBB = Node->getBlock();
+  // Function-wide width-descending: color ALL defs of the widest width across
+  // all blocks before any narrower width. This prevents narrow defs from
+  // fragmenting alignment slots needed by wider tuples (e.g., a VGPR_32 at an
+  // odd index blocking an even-aligned VReg_64 pair on gfx90a).
+  //
+  // Wider assignments are committed to ColorMap before narrower passes start,
+  // so seedOccupiedAtBBEntry naturally catches cross-block wider live-ins.
+  // For wider defs born mid-block (not live at BBStart), a per-block WiderDefs
+  // pre-scan collects them from ColorMap — O(|block|), same cost as the walk.
+  for (unsigned Width : ColoringOrder) {
+    for (auto *Node : depth_first(MDT->getRootNode())) {
+      MachineBasicBlock *MBB = Node->getBlock();
 
-    // WiderDefs: (physreg, &live-interval) for every vreg colored in this MBB
-    // by a wider pass. Size is bounded by the number of wider-width defs in
-    // this specific block — typically 0–5.
-    SmallVector<std::pair<MCRegister, const LiveInterval *>, 8> WiderDefs;
-
-    for (unsigned Width : ColoringOrder) {
       LLVM_DEBUG(dbgs() << "\n=== Width pass: " << Width << "-bit, "
                         << printMBBReference(*MBB) << " ===\n");
+
+      // Pre-scan: collect wider defs in THIS block from prior width passes.
+      // These are defs not live at BBStart (born mid-block) whose physregs
+      // must be avoided by the current narrower pass via LI.overlaps().
+      SmallVector<std::pair<MCRegister, const LiveInterval *>, 8> WiderDefs;
+      for (MachineInstr &MI : *MBB)
+        for (MachineOperand &MO : MI.defs())
+          if (MO.isReg() && MO.getReg().isVirtual()) {
+            Register Reg = MO.getReg();
+            if (TRI->getRegSizeInBits(*MRI->getRegClass(Reg)) > Width)
+              if (auto It = ColorMap.find(Reg); It != ColorMap.end())
+                WiderDefs.push_back(
+                    {It->second, &LIS->getInterval(Reg)});
+          }
+
       seedOccupiedAtBBEntry(MBB);
 
       for (MachineInstr &MI : *MBB) {
@@ -201,8 +226,6 @@ void AMDGPUSSARegisterAllocator::color() {
 
           ColorMap[Reg] = Chosen;
           markOccupied(Chosen);
-          // Record in WiderDefs so narrower passes can detect interference.
-          WiderDefs.push_back({Chosen, &LIS->getInterval(Reg)});
 
           const TargetRegisterClass *RC = MRI->getRegClass(Reg);
           unsigned Idx = TRI->getHWRegIndex(Chosen);
