@@ -572,20 +572,28 @@ void AMDGPUSSARegisterAllocator::eliminateRegSequences(MachineFunction &MF) {
       MCRegister Dst = MI.getOperand(0).getReg().asMCReg();
       LLVM_DEBUG(dbgs() << "  [RegSeq] lowering " << MI);
 
-      // Operands: dst, (src, subreg)...
+      // A REG_SEQUENCE is a *parallel* assignment: all sources are read, then
+      // each is written to its destination slice. Collect the non-trivial
+      // (Src -> dst-slice) pairs and hand them to resolvePermutation, which
+      // sequences them to respect write-after-read hazards (a slice that
+      // overwrites a register another pair still needs) and cycles. Emitting
+      // the copies naively in operand order corrupts such overlaps.
+      SmallVector<std::pair<MCRegister, MCRegister>, 4> Copies;
       for (unsigned I = 1, E = MI.getNumOperands(); I < E; I += 2) {
         MCRegister Src = MI.getOperand(I).getReg().asMCReg();
         unsigned SubIdx = MI.getOperand(I + 1).getImm();
+        // The source class may be wider than the slice it fills (e.g. a 64-bit
+        // value held in an sgpr_128 vreg). The slice index then also names the
+        // matching sub-register of the source — narrow Src to it so the COPY is
+        // width-correct. When Src already matches the slice width, SubIdx names
+        // no sub-register of Src and getSubReg() returns 0, leaving Src as-is.
+        if (MCRegister SubSrc = TRI->getSubReg(Src, SubIdx))
+          Src = SubSrc;
         MCRegister Expected = TRI->getSubReg(Dst, SubIdx);
-        if (Src == Expected)
-          continue;
-        // Non-trivial: emit COPY Expected = Src before the REG_SEQUENCE.
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(TargetOpcode::COPY),
-                Expected)
-            .addReg(Src);
-        LLVM_DEBUG(dbgs() << "      copy: " << TRI->getName(Src) << " -> "
-                          << TRI->getName(Expected) << "\n");
+        if (Src != Expected)
+          Copies.push_back({Src, Expected});
       }
+      resolvePermutation(MBB, MI, Copies);
       MI.eraseFromParent();
     }
   }
