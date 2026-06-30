@@ -211,8 +211,22 @@ private:
                            Register NewVReg,
                            LaneBitmask DefMask);
 
+  // Resolve a PHI incoming value on the edge from \p PredMBB for OrigVReg's
+  // \p Mask lanes to a def renamed earlier in this repair session whose value
+  // is live out of \p PredMBB. Returns 0 if none. Avoids leaving an
+  // OrigVReg.subIdx placeholder that no later rewrite would patch.
+  Register findRenamedReachingDef(MachineBasicBlock *PredMBB, LaneBitmask Mask);
+
   // Cache for IDF computations to avoid redundant calculations
   DenseMap<IDFCacheKey, SmallVector<MachineBasicBlock *, 4>> IDFCache;
+
+  // Per-OrigVReg repair session: maps (def block, lanes) of OrigVReg to the SSA
+  // vreg the matching def was renamed to. OrigVReg is implicit (one session at a
+  // time); the def block keeps multiple renames of the same lane distinct (e.g.
+  // a loop-preheader init vs the in-loop redef). Reset when repairSSAForNewDef
+  // is first called for a different OrigVReg.
+  Register RenameSessionOrig;
+  DenseMap<std::pair<MachineBasicBlock *, LaneBitmask>, Register> RenamedLaneDefs;
 
   // Internal helper methods for use rewriting
   VNInfo *incomingOnEdge(LiveInterval &LI, MachineInstr *Phi, MachineOperand &PhiOp);

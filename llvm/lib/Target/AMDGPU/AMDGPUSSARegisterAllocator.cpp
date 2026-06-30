@@ -553,6 +553,9 @@ void AMDGPUSSARegisterAllocator::finalizeProperties(MachineFunction &MF) {
   MRI->clearVirtRegs();
   MF.getProperties().set(MachineFunctionProperties::Property::NoPHIs);
   MF.getProperties().set(MachineFunctionProperties::Property::NoVRegs);
+  // SSA RA gives each tied def the same physreg as its tied use, restoring
+  // two-address form (as VirtRegRewriter does on the greedy path).
+  MF.getProperties().set(MachineFunctionProperties::Property::TiedOpsRewritten);
 }
 
 // Eliminate REG_SEQUENCE instructions after physreg assignment.

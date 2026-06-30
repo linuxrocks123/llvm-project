@@ -165,6 +165,9 @@ bool AMDGPURebuildSSALegacy::runOnMachineFunction(MachineFunction &MF) {
 
   MF.getProperties().set(MachineFunctionProperties::Property::IsSSA);
   MF.getProperties().reset(MachineFunctionProperties::Property::NoPHIs);
+  // Re-SSA-ifying turns rewritten two-address tied operands back into distinct
+  // SSA values (def != use), so the function is no longer in two-address form.
+  MF.getProperties().reset(MachineFunctionProperties::Property::TiedOpsRewritten);
 
   LLVM_DEBUG({
     dbgs() << "=== verify ===\n";

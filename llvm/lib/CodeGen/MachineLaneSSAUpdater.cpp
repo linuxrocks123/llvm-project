@@ -58,6 +58,13 @@ Register MachineLaneSSAUpdater::repairSSAForNewDef(
 
   MachineRegisterInfo &MRI = MF.getRegInfo();
 
+  // Scope the rename map to one OrigVReg. The driver processes all defs of an
+  // OrigVReg before moving on, so clearing on change is sufficient.
+  if (RenameSessionOrig != OrigVReg) {
+    RenameSessionOrig = OrigVReg;
+    RenamedLaneDefs.clear();
+  }
+
   // Step 1: Find the def operand for OrigVReg
   MachineOperand *DefOp = nullptr;
   unsigned DefOpIdx = 0;
@@ -118,7 +125,12 @@ Register MachineLaneSSAUpdater::repairSSAForNewDef(
   
   // Step 5: Index the new instruction in SlotIndexes/LIS
   indexNewInstr(NewDefMI);
-  
+
+  // Make this rename available to later PHI construction in this session, so a
+  // PHI operand on an edge reached by this def can be resolved to NewSSAVReg
+  // instead of an OrigVReg.subIdx placeholder.
+  RenamedLaneDefs[{NewDefMI.getParent(), DefMask}] = NewSSAVReg;
+
   // Step 6: Perform common SSA repair (PHI placement + use rewriting)
   // LiveInterval for NewSSAVReg will be created by getInterval() as needed
   PHIRegDefOps = performSSARepair(NewSSAVReg, OrigVReg, DefMask, NewDefMI.getParent());
@@ -532,21 +544,30 @@ MachineLaneSSAUpdater::createPHIInBlock(MachineBasicBlock &JoinMBB,
       PHIOperands.push_back(MachineOperand::CreateMBB(PredMBB));
       
     } else {
-      // This is the original path - use OrigVReg with appropriate subregister
-      LLVM_DEBUG(dbgs() << "        Pred BB#" << PredMBB->getNumber() 
-                        << " contributes OrigVReg (original path)\n");
-      
-      if (IsPartialReload) {
-        // Partial case: z = PHI(y, BB1, x.sub2_3, BB0)
-        // Use DefMask to find which subreg of OrigVReg was redefined
-        unsigned SubIdx = getSubRegIndexForLaneMask(DefMask, &TRI);
-        PHIOperands.push_back(MachineOperand::CreateReg(OrigVReg, /*isDef*/ false,
-                                                       /*isImp*/ false, /*isKill*/ false,
-                                                       /*isDead*/ false, /*isUndef*/ false,
-                                                       /*isEarlyClobber*/ false, SubIdx));
+      // Original path. Prefer a def renamed earlier this session whose value is
+      // live out of PredMBB: the OrigVReg.subIdx placeholder is only patched by
+      // a later rewriteDominatedUses, which misses defs renamed *before* this
+      // PHI was created (e.g. a loop-preheader lane def processed before the
+      // loop redef that triggers the header PHI).
+      if (Register Reaching = findRenamedReachingDef(PredMBB, DefMask)) {
+        LLVM_DEBUG(dbgs() << "        Pred BB#" << PredMBB->getNumber()
+                          << " contributes renamed reaching def " << Reaching << "\n");
+        PHIOperands.push_back(MachineOperand::CreateReg(Reaching, /*isDef*/ false));
       } else {
-        // Full register case: z = PHI(y, BB1, x, BB0)
-        PHIOperands.push_back(MachineOperand::CreateReg(OrigVReg, /*isDef*/ false));
+        LLVM_DEBUG(dbgs() << "        Pred BB#" << PredMBB->getNumber()
+                          << " contributes OrigVReg (original path)\n");
+        if (IsPartialReload) {
+          // Partial case: z = PHI(y, BB1, x.sub2_3, BB0)
+          // Use DefMask to find which subreg of OrigVReg was redefined
+          unsigned SubIdx = getSubRegIndexForLaneMask(DefMask, &TRI);
+          PHIOperands.push_back(MachineOperand::CreateReg(OrigVReg, /*isDef*/ false,
+                                                         /*isImp*/ false, /*isKill*/ false,
+                                                         /*isDead*/ false, /*isUndef*/ false,
+                                                         /*isEarlyClobber*/ false, SubIdx));
+        } else {
+          // Full register case: z = PHI(y, BB1, x, BB0)
+          PHIOperands.push_back(MachineOperand::CreateReg(OrigVReg, /*isDef*/ false));
+        }
       }
       PHIOperands.push_back(MachineOperand::CreateMBB(PredMBB));
     }
@@ -744,6 +765,23 @@ VNInfo *MachineLaneSSAUpdater::incomingOnEdge(LiveInterval &LI, MachineInstr *Ph
   MachineBasicBlock *Pred = Phi->getOperand(OpIdx + 1).getMBB();
   SlotIndex EndB = LIS.getMBBEndIdx(Pred);
   return LI.getVNInfoBefore(EndB);
+}
+
+Register
+MachineLaneSSAUpdater::findRenamedReachingDef(MachineBasicBlock *PredMBB,
+                                              LaneBitmask Mask) {
+  SlotIndex End = LIS.getMBBEndIdx(PredMBB);
+  for (const auto &KV : RenamedLaneDefs) {
+    LaneBitmask DefLanes = KV.first.second;
+    Register Cand = KV.second;
+    if ((DefLanes & Mask) != Mask) // must cover the requested lanes
+      continue;
+    // SSA guarantees at most one candidate for these lanes is live out of
+    // PredMBB; that one is the reaching def.
+    if (LIS.hasInterval(Cand) && LIS.getInterval(Cand).getVNInfoBefore(End))
+      return Cand;
+  }
+  return Register();
 }
 
 /// Check if \p DefMI's definition reaches \p UseMI's use operand.
