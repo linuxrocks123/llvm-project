@@ -682,11 +682,22 @@ void MachineLaneSSAUpdater::rewriteDominatedUses(Register OrigVReg,
     // Case 2: Super/Mixed - use needs more lanes than we're rewriting
     if ((OpMask & ~MaskToRewrite).any()) {
       LLVM_DEBUG(dbgs() << "      Super/Mixed case -> building REG_SEQUENCE\n");
-      
+
+      // Size the result to the use's width as a *whole* register. The class is
+      // the sub0-aligned subclass for OpMask's lanes: the RS result is a fresh
+      // register with no offset constraint, so a misaligned slice like
+      // sub1_sub2_sub3 (which has no subclass) still materializes as SGPR_96.
+      const TargetRegisterClass *UseRC = OpRC;
+      if (MO.getSubReg()) {
+        unsigned AlignedSub =
+            getSubRegIndexForLaneMask(rebaseLaneMask(OpMask, OpMask), &TRI);
+        UseRC = TRI.getSubRegisterClass(OpRC, AlignedSub);
+      }
+
       SmallVector<LaneBitmask, 4> LanesToExtend;
       SlotIndex RSIdx;
       Register RSReg = buildRSForSuperUse(UseMI, MO, OrigVReg, NewSSA, MaskToRewrite,
-                                          OrigLI, OpRC, RSIdx, LanesToExtend);
+                                          OrigLI, UseRC, RSIdx, LanesToExtend);
       extendAt(OrigLI, RSIdx, LanesToExtend);
       MO.setReg(RSReg);
       MO.setSubReg(0);
@@ -717,9 +728,8 @@ void MachineLaneSSAUpdater::rewriteDominatedUses(Register OrigVReg,
         // Different register classes - need to map lane namespace
         // MaskToRewrite defines which lanes of OrigVReg we redefined
         // NewSSA is a narrower register that holds just those lanes
-        // Shift OpMask down to map from OrigVReg space to NewSSA space
-        unsigned ShiftAmt = llvm::countr_zero(MaskToRewrite.getAsInteger());
-        MappedOpMask = LaneBitmask(OpMask.getAsInteger() >> ShiftAmt);
+        // Re-base OpMask from OrigVReg's namespace into NewSSA's.
+        MappedOpMask = rebaseLaneMask(OpMask, MaskToRewrite);
         
         LLVM_DEBUG(dbgs() << "        Namespace mapping: OrigRC=" << TRI.getRegClassName(OpRC)
                           << " NewRC=" << TRI.getRegClassName(NewRC)
@@ -1062,7 +1072,7 @@ static SmallVector<unsigned, 4> getCoveringSubRegsForLaneMask(
 Register MachineLaneSSAUpdater::buildRSForSuperUse(MachineInstr *UseMI, MachineOperand &MO,
                                                    Register OldVR, Register NewVR,
                                                    LaneBitmask MaskToRewrite, LiveInterval &LI,
-                                                   const TargetRegisterClass *OpRC,
+                                                   const TargetRegisterClass *UseRC,
                                                    SlotIndex &OutIdx,
                                                    SmallVectorImpl<LaneBitmask> &LanesToExtend) {
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
@@ -1083,14 +1093,21 @@ Register MachineLaneSSAUpdater::buildRSForSuperUse(MachineInstr *UseMI, MachineO
     QueryIdx = LIS.getInstructionIndex(*UseMI);
   }
 
-  Register Dest = MRI.createVirtualRegister(OpRC);
+  // Lanes the use needs. UseRC is already sized to exactly these lanes, so the
+  // caller reads Dest whole.
+  LaneBitmask UseMask = operandLaneMask(MO);
+
+  // REG_SEQUENCE destination indices are in Dest's (narrower) namespace, while
+  // the lane masks below are in OrigVReg's; re-base to convert.
+  auto DestSub = [&](LaneBitmask Lanes) {
+    return getSubRegIndexForLaneMask(rebaseLaneMask(Lanes, UseMask), &TRI);
+  };
+
+  Register Dest = MRI.createVirtualRegister(UseRC);
   auto RS = BuildMI(*InsertBB, IP,
                     (IP != InsertBB->end() ? IP->getDebugLoc() : DebugLoc()),
                     TII.get(TargetOpcode::REG_SEQUENCE), Dest);
 
-  // Determine what lanes the use needs
-  LaneBitmask UseMask = operandLaneMask(MO);
-  
   // Decompose into lanes from NewVR (updated) and lanes from OldVR (unchanged)
   LaneBitmask LanesFromNew = UseMask & MaskToRewrite;
   LaneBitmask LanesFromOld = UseMask & ~MaskToRewrite;
@@ -1105,7 +1122,7 @@ Register MachineLaneSSAUpdater::buildRSForSuperUse(MachineInstr *UseMI, MachineO
   if (LanesFromNew.any()) {
     unsigned SubIdx = getSubRegIndexForLaneMask(LanesFromNew, &TRI);
     assert(SubIdx && "Failed to find subregister index for LanesFromNew");
-    RS.addReg(NewVR, 0, 0).addImm(SubIdx);  // NewVR is full register, no subreg
+    RS.addReg(NewVR, 0, 0).addImm(DestSub(LanesFromNew));  // NewVR whole
     AddedSubIdxs.insert(SubIdx);
     LanesToExtend.push_back(LanesFromNew);
   }
@@ -1118,7 +1135,7 @@ Register MachineLaneSSAUpdater::buildRSForSuperUse(MachineInstr *UseMI, MachineO
     
     if (SubIdx) {
       // Contiguous case: single subregister covers all lanes
-      RS.addReg(OldVR, 0, SubIdx).addImm(SubIdx);  // OldVR.subIdx
+      RS.addReg(OldVR, 0, SubIdx).addImm(DestSub(LanesFromOld));  // OldVR.subIdx
       AddedSubIdxs.insert(SubIdx);
       LanesToExtend.push_back(LanesFromOld);
     } else {
@@ -1136,7 +1153,7 @@ Register MachineLaneSSAUpdater::buildRSForSuperUse(MachineInstr *UseMI, MachineO
       // Add each covering subregister as a source to the REG_SEQUENCE
       for (unsigned CoverSubIdx : CoveringSubRegs) {
         LaneBitmask CoverMask = TRI.getSubRegIndexLaneMask(CoverSubIdx);
-        RS.addReg(OldVR, 0, CoverSubIdx).addImm(CoverSubIdx);  // OldVR.CoverSubIdx
+        RS.addReg(OldVR, 0, CoverSubIdx).addImm(DestSub(CoverMask));  // OldVR.CoverSubIdx
         AddedSubIdxs.insert(CoverSubIdx);
         LanesToExtend.push_back(CoverMask);
         

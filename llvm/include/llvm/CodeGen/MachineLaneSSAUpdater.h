@@ -15,6 +15,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"        // SmallVector
+#include "llvm/ADT/bit.h"                 // countr_zero
 #include "llvm/CodeGen/LiveInterval.h"    // LiveRange
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/Register.h"       // Register
@@ -235,7 +236,7 @@ private:
   LaneBitmask operandLaneMask(const MachineOperand &MO);
   Register buildRSForSuperUse(MachineInstr *UseMI, MachineOperand &MO,
                              Register OldVR, Register NewVR, LaneBitmask MaskToRewrite,
-                             LiveInterval &LI, const TargetRegisterClass *OpRC,
+                             LiveInterval &LI, const TargetRegisterClass *UseRC,
                              SlotIndex &OutIdx, SmallVectorImpl<LaneBitmask> &LanesToExtend);
   void extendAt(LiveInterval &LI, SlotIndex Idx, ArrayRef<LaneBitmask> Lanes);
   void updateDeadFlags(Register Reg);
@@ -268,6 +269,15 @@ inline unsigned getSubRegIndexForLaneMask(LaneBitmask Mask, const TargetRegister
   
   // No exact match found - this might be a composite mask requiring REG_SEQUENCE
   return 0;
+}
+
+/// Re-express a lane mask from a super-register's namespace into the namespace
+/// of a sub-register. \p Base is the sub-register's lane mask (in the super's
+/// namespace); the result shifts \p Lanes down so Base's first lane sits at
+/// bit 0. Identity when Base already starts at lane 0.
+inline LaneBitmask rebaseLaneMask(LaneBitmask Lanes, LaneBitmask Base) {
+  return LaneBitmask(Lanes.getAsInteger() >>
+                     llvm::countr_zero(Base.getAsInteger()));
 }
 
 // DenseMapInfo specialization for LaneBitmask
