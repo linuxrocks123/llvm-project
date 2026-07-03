@@ -34,7 +34,7 @@
   exit:
     ret void
   }
-  attributes #0 = { "amdgpu-num-vgpr"="5" "target-cpu"="gfx1200" }
+  attributes #0 = { "amdgpu-num-vgpr"="5" }
 ...
 ---
 name:            loop_skip_def_inside

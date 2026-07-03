@@ -1,0 +1,68 @@
+# RUN: llc -mtriple=amdgcn -mcpu=fiji -verify-machineinstrs \
+# RUN:   -run-pass=amdgpu-ssa-register-allocator -o - %s | FileCheck %s
+# REQUIRES: asserts
+#
+# VGPR permutation cycle on a subtarget WITHOUT V_SWAP (fiji / gfx8: hasSwap() is
+# false) and with low register pressure, so the scratch tier (Tier 1) applies:
+# the 2-cycle is resolved via a scratch VGPR (3 COPYs), not V_SWAP_B32 and not the
+# V_XOR triplet. Complements destruct-swap.mir (gfx1200 -> V_SWAP) and
+# destruct-wide-swap.mir (fiji, high pressure -> V_XOR triplet).
+#
+# Same shape as destruct-swap.mir: two cross-referencing PHIs form a VGPR0<->VGPR1
+# swap; coloring gives %0->VGPR0, %1->VGPR1, %2->VGPR0, %3->VGPR1.
+
+# CHECK-LABEL: name: test_destruct_cycle_scratch
+# CHECK: bb.1:
+# CHECK-NOT: COPY
+# CHECK: S_BRANCH %bb.3
+# CHECK: bb.2:
+# CHECK:      $vgpr2 = COPY $vgpr1
+# CHECK-NEXT: $vgpr1 = COPY $vgpr0
+# CHECK-NEXT: $vgpr0 = COPY $vgpr2
+# CHECK-NEXT: S_BRANCH %bb.3
+# CHECK: bb.3:
+# CHECK-NOT: PHI
+# CHECK: S_ENDPGM 0, implicit $vgpr0, implicit $vgpr1
+
+--- |
+  define amdgpu_kernel void @test_destruct_cycle_scratch() {
+  bb0:
+    br i1 undef, label %bb1, label %bb2
+  bb1:
+    br label %bb3
+  bb2:
+    br label %bb3
+  bb3:
+    ret void
+  }
+...
+---
+name:            test_destruct_cycle_scratch
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: vgpr_32 }
+  - { id: 1, class: vgpr_32 }
+  - { id: 2, class: vgpr_32 }
+  - { id: 3, class: vgpr_32 }
+body: |
+  bb.0:
+    successors: %bb.1, %bb.2
+    %0:vgpr_32 = V_MOV_B32_e32 1, implicit $exec
+    %1:vgpr_32 = V_MOV_B32_e32 2, implicit $exec
+    S_CBRANCH_EXECZ %bb.2, implicit $exec
+    S_BRANCH %bb.1
+
+  bb.1:
+    successors: %bb.3
+    S_BRANCH %bb.3
+
+  bb.2:
+    successors: %bb.3
+    S_BRANCH %bb.3
+
+  bb.3:
+    %2:vgpr_32 = PHI %0, %bb.1, %1, %bb.2
+    %3:vgpr_32 = PHI %1, %bb.1, %0, %bb.2
+    S_ENDPGM 0, implicit %2, implicit %3
+...

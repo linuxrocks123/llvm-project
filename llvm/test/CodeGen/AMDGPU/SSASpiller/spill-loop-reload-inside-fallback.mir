@@ -27,7 +27,7 @@
     ret void
   }
   ; VGPR limit = 90% of 7 = 6
-  attributes #0 = { "amdgpu-num-vgpr"="7" "target-cpu"="gfx1200" }
+  attributes #0 = { "amdgpu-num-vgpr"="7" }
 ...
 ---
 name:            loop_reload_inside_fallback

@@ -28,11 +28,10 @@
 # CHECK: S_ENDPGM 0, implicit $vgpr0, implicit $vgpr1
 
 --- |
-  define amdgpu_kernel void @test_destruct_rewrite() #0 {
+  define amdgpu_kernel void @test_destruct_rewrite() {
   bb0:
     ret void
   }
-  attributes #0 = { "target-cpu"="gfx1200" }
 ...
 ---
 name:            test_destruct_rewrite

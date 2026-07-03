@@ -20,8 +20,7 @@
 # CHECK-DAG: %2 -> VGPR0
 
 --- |
-  define amdgpu_kernel void @test_basic_coloring() #0 { ret void }
-  attributes #0 = { "target-cpu"="gfx1200" }
+  define amdgpu_kernel void @test_basic_coloring() { ret void }
 ...
 ---
 name:            test_basic_coloring

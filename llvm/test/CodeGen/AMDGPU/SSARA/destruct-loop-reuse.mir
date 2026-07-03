@@ -37,7 +37,7 @@
 # CHECK: S_ENDPGM
 
 --- |
-  define amdgpu_kernel void @test_destruct_loop_reuse() #0 {
+  define amdgpu_kernel void @test_destruct_loop_reuse() {
   entry:
     br label %header
   header:
@@ -47,7 +47,6 @@
   exit:
     ret void
   }
-  attributes #0 = { "target-cpu"="gfx1200" }
 ...
 ---
 name:            test_destruct_loop_reuse

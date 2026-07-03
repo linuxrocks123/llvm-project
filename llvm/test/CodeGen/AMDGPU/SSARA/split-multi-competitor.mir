@@ -45,7 +45,7 @@
   bb2:
     ret void
   }
-  attributes #0 = { "amdgpu-num-vgpr"="16" "target-cpu"="gfx1200" }
+  attributes #0 = { "amdgpu-num-vgpr"="16" }
 ...
 ---
 name:            test_split_multi_comp

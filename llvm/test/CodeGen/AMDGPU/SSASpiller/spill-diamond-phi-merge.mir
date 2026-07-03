@@ -60,7 +60,7 @@
     ret void
   }
 
-  attributes #0 = { "amdgpu-num-vgpr"="3" "target-cpu"="gfx1200" }
+  attributes #0 = { "amdgpu-num-vgpr"="3" }
 ...
 
 ---

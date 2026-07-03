@@ -17,8 +17,7 @@
 # CHECK-NOT: Split for occupancy
 
 --- |
-  define amdgpu_kernel void @test_split_noop() #0 { ret void }
-  attributes #0 = { "target-cpu"="gfx1200" }
+  define amdgpu_kernel void @test_split_noop() { ret void }
 ...
 ---
 name:            test_split_noop

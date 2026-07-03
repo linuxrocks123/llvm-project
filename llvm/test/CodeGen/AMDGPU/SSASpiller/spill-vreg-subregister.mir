@@ -34,7 +34,7 @@
     br label %Flow
   }
 
-  attributes #0 = { "amdgpu-num-vgpr"="7" "target-cpu"="gfx1200" }
+  attributes #0 = { "amdgpu-num-vgpr"="7" }
 ...
 ---
 name:            test_subregs

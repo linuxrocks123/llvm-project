@@ -64,10 +64,10 @@
   ; Function Attrs: nocallback nofree nounwind willreturn
   declare void @llvm.amdgcn.end.cf.i64(i64) #2
 
-  attributes #0 = { "amdgpu-flat-work-group-size"="1,256" "amdgpu-memory-bound"="true" "target-cpu"="gfx900" }
-  attributes #1 = { nocallback nofree nosync nounwind speculatable willreturn memory(none) "target-cpu"="gfx900" }
-  attributes #2 = { nocallback nofree nounwind willreturn "target-cpu"="gfx900" }
-  attributes #3 = { nocallback nofree nounwind willreturn memory(none) "target-cpu"="gfx900" }
+  attributes #0 = { "amdgpu-flat-work-group-size"="1,256" "amdgpu-memory-bound"="true" }
+  attributes #1 = { nocallback nofree nosync nounwind speculatable willreturn memory(none) }
+  attributes #2 = { nocallback nofree nounwind willreturn }
+  attributes #3 = { nocallback nofree nounwind willreturn memory(none) }
 
   !0 = !{}
 ...

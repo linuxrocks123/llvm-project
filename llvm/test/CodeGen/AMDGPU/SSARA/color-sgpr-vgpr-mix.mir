@@ -10,8 +10,7 @@
 # CHECK-DAG: %1 -> SGPR0
 
 --- |
-  define amdgpu_kernel void @test_sgpr_vgpr_mix() #0 { ret void }
-  attributes #0 = { "target-cpu"="gfx1200" }
+  define amdgpu_kernel void @test_sgpr_vgpr_mix() { ret void }
 ...
 ---
 name:            test_sgpr_vgpr_mix

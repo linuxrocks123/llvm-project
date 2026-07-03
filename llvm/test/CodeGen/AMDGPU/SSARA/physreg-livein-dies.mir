@@ -29,11 +29,10 @@
 # CHECK-NEXT: S_ENDPGM 0, implicit $vgpr1, implicit $vgpr0
 
 --- |
-  define amdgpu_kernel void @test_physreg_livein_dies() #0 {
+  define amdgpu_kernel void @test_physreg_livein_dies() {
   entry:
     ret void
   }
-  attributes #0 = { "target-cpu"="gfx1200" }
 ...
 ---
 name:            test_physreg_livein_dies

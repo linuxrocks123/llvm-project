@@ -34,7 +34,7 @@
 # Max index = 11 = maxRP (width-descending optimal)
 
 --- |
-  define amdgpu_kernel void @test_width_advantage() #0 {
+  define amdgpu_kernel void @test_width_advantage() {
   bb0:
     br label %bb1
   bb1:
@@ -42,7 +42,6 @@
   bb2:
     ret void
   }
-  attributes #0 = { "target-cpu"="gfx1200" }
 ...
 ---
 name:            test_width_advantage

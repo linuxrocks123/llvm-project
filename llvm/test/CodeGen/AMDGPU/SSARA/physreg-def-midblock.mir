@@ -29,11 +29,10 @@
 # CHECK-NEXT: S_ENDPGM 0, implicit $vgpr0, implicit $vgpr1
 
 --- |
-  define amdgpu_kernel void @test_physreg_def_midblock() #0 {
+  define amdgpu_kernel void @test_physreg_def_midblock() {
   entry:
     ret void
   }
-  attributes #0 = { "target-cpu"="gfx1200" }
 ...
 ---
 name:            test_physreg_def_midblock

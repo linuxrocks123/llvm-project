@@ -19,7 +19,7 @@
 
 --- |
   define amdgpu_kernel void @test_split_all_or_nothing() #0 { ret void }
-  attributes #0 = { "amdgpu-num-vgpr"="12" "target-cpu"="gfx1200" }
+  attributes #0 = { "amdgpu-num-vgpr"="12" }
 ...
 ---
 name:            test_split_all_or_nothing

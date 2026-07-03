@@ -16,13 +16,12 @@
 # CHECK-DAG: %0 -> VGPR6
 
 --- |
-  define amdgpu_kernel void @test_width_descending() #0 {
+  define amdgpu_kernel void @test_width_descending() {
   bb0:
     br label %bb1
   bb1:
     ret void
   }
-  attributes #0 = { "target-cpu"="gfx1200" }
 ...
 ---
 name:            test_width_descending

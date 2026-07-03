@@ -21,8 +21,7 @@
 # CHECK-DAG: %2 -> VGPR0_VGPR1
 
 --- |
-  define amdgpu_kernel void @test_reuse_after_death() #0 { ret void }
-  attributes #0 = { "target-cpu"="gfx1200" }
+  define amdgpu_kernel void @test_reuse_after_death() { ret void }
 ...
 ---
 name:            test_reuse_after_death

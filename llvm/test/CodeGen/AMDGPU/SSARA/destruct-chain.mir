@@ -46,7 +46,7 @@
 # CHECK-NEXT: S_BRANCH %bb.1
 
 --- |
-  define amdgpu_kernel void @test_destruct_chain() #0 {
+  define amdgpu_kernel void @test_destruct_chain() {
   entry:
     br label %header
   header:
@@ -56,7 +56,6 @@
   exit:
     ret void
   }
-  attributes #0 = { "target-cpu"="gfx1200" }
 ...
 ---
 name:            test_destruct_chain

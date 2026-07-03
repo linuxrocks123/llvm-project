@@ -1,0 +1,60 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1200 -verify-machineinstrs \
+# RUN:   -run-pass=amdgpu-ssa-register-allocator -o - %s | FileCheck %s
+# REQUIRES: asserts
+#
+# Test: 96-bit SGPR 2-cycle. An odd dword count is covered as an aligned
+# 64-bit chunk (S_XOR_B64 on sub0_sub1) plus a trailing 32-bit chunk
+# (S_XOR_B32 on sub2), since SCC is dead at the branch.
+
+# CHECK-LABEL: name: test_destruct_sgpr96_swap
+# CHECK: bb.2:
+# CHECK:      $sgpr4_sgpr5 = S_XOR_B64 $sgpr4_sgpr5, $sgpr0_sgpr1, implicit-def $scc
+# CHECK-NEXT: $sgpr0_sgpr1 = S_XOR_B64 $sgpr4_sgpr5, $sgpr0_sgpr1, implicit-def $scc
+# CHECK-NEXT: $sgpr4_sgpr5 = S_XOR_B64 $sgpr4_sgpr5, $sgpr0_sgpr1, implicit-def $scc
+# CHECK-NEXT: $sgpr6 = S_XOR_B32 $sgpr6, $sgpr2, implicit-def $scc
+# CHECK-NEXT: $sgpr2 = S_XOR_B32 $sgpr6, $sgpr2, implicit-def $scc
+# CHECK-NEXT: $sgpr6 = S_XOR_B32 $sgpr6, $sgpr2, implicit-def $scc
+# CHECK-NEXT: S_BRANCH %bb.3
+
+--- |
+  define amdgpu_kernel void @test_destruct_sgpr96_swap() {
+  bb0:
+    br i1 undef, label %bb1, label %bb2
+  bb1:
+    br label %bb3
+  bb2:
+    br label %bb3
+  bb3:
+    ret void
+  }
+...
+---
+name:            test_destruct_sgpr96_swap
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: sgpr_96 }
+  - { id: 1, class: sgpr_96 }
+  - { id: 2, class: sgpr_96 }
+  - { id: 3, class: sgpr_96 }
+body: |
+  bb.0:
+    successors: %bb.1, %bb.2
+    %0:sgpr_96 = IMPLICIT_DEF
+    %1:sgpr_96 = IMPLICIT_DEF
+    S_CBRANCH_EXECZ %bb.2, implicit $exec
+    S_BRANCH %bb.1
+
+  bb.1:
+    successors: %bb.3
+    S_BRANCH %bb.3
+
+  bb.2:
+    successors: %bb.3
+    S_BRANCH %bb.3
+
+  bb.3:
+    %2:sgpr_96 = PHI %0, %bb.1, %1, %bb.2
+    %3:sgpr_96 = PHI %1, %bb.1, %0, %bb.2
+    S_ENDPGM 0, implicit %2, implicit %3
+...

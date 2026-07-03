@@ -43,14 +43,12 @@
 # CHECK-NEXT: S_NOP 0, implicit $vgpr1
 # CHECK-NEXT: $vgpr1 = V_ADD_U32_e64 $vgpr2, 1, 0
 # CHECK-NEXT: S_NOP 0, implicit $vgpr2
-# CHECK-NEXT: $vgpr3 = COPY $vgpr2
-# CHECK-NEXT: $vgpr2 = COPY $vgpr1
-# CHECK-NEXT: $vgpr1 = COPY $vgpr0
-# CHECK-NEXT: $vgpr0 = COPY $vgpr3
+# CHECK-NEXT: $vgpr1, $vgpr0 = V_SWAP_B32 $vgpr0, $vgpr1, implicit $exec
+# CHECK-NEXT: $vgpr2, $vgpr1 = V_SWAP_B32 $vgpr1, $vgpr2, implicit $exec
 # CHECK-NEXT: S_BRANCH %bb.1
 
 --- |
-  define amdgpu_kernel void @test_destruct_cycle3() #0 {
+  define amdgpu_kernel void @test_destruct_cycle3() {
   entry:
     br label %header
   header:
@@ -60,7 +58,6 @@
   exit:
     ret void
   }
-  attributes #0 = { "target-cpu"="gfx1200" }
 ...
 ---
 name:            test_destruct_cycle3

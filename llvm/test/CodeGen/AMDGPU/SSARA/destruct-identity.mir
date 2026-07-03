@@ -40,7 +40,7 @@
 # CHECK: S_ENDPGM 0, implicit $vgpr0
 
 --- |
-  define amdgpu_kernel void @test_destruct_identity() #0 {
+  define amdgpu_kernel void @test_destruct_identity() {
   bb0:
     br i1 undef, label %bb1, label %bb2
   bb1:
@@ -50,7 +50,6 @@
   bb3:
     ret void
   }
-  attributes #0 = { "target-cpu"="gfx1200" }
 ...
 ---
 name:            test_destruct_identity

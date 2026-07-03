@@ -49,7 +49,7 @@
   use:
     ret void
   }
-  attributes #0 = { "amdgpu-num-sgpr"="7" "amdgpu-num-vgpr"="4" "target-cpu"="gfx1200" }
+  attributes #0 = { "amdgpu-num-sgpr"="7" "amdgpu-num-vgpr"="4" }
 ...
 ---
 name:            sgpr_budget_reduction

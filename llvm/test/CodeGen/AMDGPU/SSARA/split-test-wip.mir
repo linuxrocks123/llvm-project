@@ -34,13 +34,12 @@
 # CHECK-DAG: %7 -> VGPR28_VGPR29_VGPR30_VGPR31
 
 --- |
-  define amdgpu_kernel void @split_test() #0 {
+  define amdgpu_kernel void @split_test() {
   bb0:
     br label %bb1
   bb1:
     ret void
   }
-  attributes #0 = { "target-cpu"="gfx900" }
 ...
 ---
 name:            split_test

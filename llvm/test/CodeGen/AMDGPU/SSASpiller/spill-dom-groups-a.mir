@@ -29,7 +29,7 @@
     ret void
   }
 
-  attributes #0 = { "amdgpu-num-vgpr"="8" "target-cpu"="gfx1200" }
+  attributes #0 = { "amdgpu-num-vgpr"="8" }
 ...
 ---
 name:            two_dom_groups_spill

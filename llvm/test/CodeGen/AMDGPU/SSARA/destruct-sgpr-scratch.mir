@@ -1,0 +1,74 @@
+# RUN: llc -mtriple=amdgcn -mcpu=gfx900 -verify-machineinstrs \
+# RUN:   -run-pass=amdgpu-ssa-register-allocator -o - %s | FileCheck %s
+# REQUIRES: asserts
+#
+# SGPR permutation cycle resolved via SCRATCH because SCC is LIVE at the insert
+# point. The latch computes the back-edge swap, then S_CMP sets SCC which the
+# S_CBRANCH_SCC1 terminator consumes. The cycle copies are inserted between the
+# S_CMP and the branch, so an S_XOR triplet (writes SCC) would corrupt the
+# branch condition -- resolvePermutation must use scratch COPYs instead
+# (UseScratch = !SccDead). Counterpart to destruct-sgpr-swap.mir (SCC dead ->
+# S_XOR). The exit uses a separate reg (%6), so the critical back edge does not
+# need splitting.
+#
+# Coloring: %2->SGPR0, %3->SGPR1 (loop-carried), %4->SGPR1, %5->SGPR0 (swap),
+# %6->SGPR2. Back edge SGPR0<->SGPR1 cycle; scratch = SGPR3.
+
+# CHECK-LABEL: name: test_sgpr_scratch
+# CHECK: bb.2:
+# CHECK:      S_CMP_EQ_U32 $sgpr2, 0, implicit-def $scc
+# CHECK-NEXT: $sgpr3 = COPY $sgpr0
+# CHECK-NEXT: $sgpr0 = COPY $sgpr1
+# CHECK-NEXT: $sgpr1 = COPY $sgpr3
+# CHECK-NEXT: S_CBRANCH_SCC1 %bb.1, implicit $scc
+# CHECK-NOT: S_XOR
+
+--- |
+  define amdgpu_kernel void @test_sgpr_scratch() {
+  entry:
+    br label %header
+  header:
+    br label %latch
+  latch:
+    br i1 undef, label %header, label %exit
+  exit:
+    ret void
+  }
+...
+---
+name:            test_sgpr_scratch
+tracksRegLiveness: true
+isSSA:           true
+registers:
+  - { id: 0, class: sgpr_32 }
+  - { id: 1, class: sgpr_32 }
+  - { id: 2, class: sgpr_32 }
+  - { id: 3, class: sgpr_32 }
+  - { id: 4, class: sgpr_32 }
+  - { id: 5, class: sgpr_32 }
+  - { id: 6, class: sgpr_32 }
+body: |
+  bb.0:
+    successors: %bb.1
+    %0:sgpr_32 = S_MOV_B32 1
+    %1:sgpr_32 = S_MOV_B32 2
+    S_BRANCH %bb.1
+
+  bb.1:
+    successors: %bb.2
+    %2:sgpr_32 = PHI %0, %bb.0, %4, %bb.2
+    %3:sgpr_32 = PHI %1, %bb.0, %5, %bb.2
+    S_BRANCH %bb.2
+
+  bb.2:
+    successors: %bb.1, %bb.3
+    %4:sgpr_32 = S_ADD_I32 %3, 1, implicit-def dead $scc
+    %5:sgpr_32 = S_ADD_I32 %2, 1, implicit-def dead $scc
+    %6:sgpr_32 = S_ADD_I32 %4, %5, implicit-def dead $scc
+    S_CMP_EQ_U32 %6, 0, implicit-def $scc
+    S_CBRANCH_SCC1 %bb.1, implicit $scc
+    S_BRANCH %bb.3
+
+  bb.3:
+    S_ENDPGM 0, implicit %6
+...

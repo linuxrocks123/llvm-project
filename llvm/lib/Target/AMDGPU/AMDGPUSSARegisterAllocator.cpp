@@ -123,6 +123,65 @@ void AMDGPUSSARegisterAllocator::seedOccupiedAtBBEntry(MachineBasicBlock *MBB) {
   }
 }
 
+bool AMDGPUSSARegisterAllocator::edgeCopiesNeedSplit(
+    MachineBasicBlock *Pred, MachineBasicBlock *MBB,
+    ArrayRef<std::pair<MCRegister, MCRegister>> Copies) const {
+  // Not a critical edge -> placing the copies at Pred's terminator is safe.
+  if (Pred->succ_size() <= 1 || MBB->pred_size() <= 1)
+    return false;
+
+  // Reg units written by the edge copies (the PHI-result destinations).
+  BitVector DstUnits(TRI->getNumRegUnits());
+  for (auto &[SrcPhys, DstPhys] : Copies)
+    for (MCRegUnit U : TRI->regunits(DstPhys))
+      DstUnits.set(U);
+  auto Overlaps = [&](MCRegister PhysReg) {
+    for (MCRegUnit U : TRI->regunits(PhysReg))
+      if (DstUnits.test(U))
+        return true;
+    return false;
+  };
+
+  // A permutation cycle among the copies does NOT force a split. resolvePermutation
+  // breaks a cycle either with a scratch register or with V_SWAP_B32/XOR:
+  //   - the scratch is allocated above the high-water mark (VGPR0 + MaxVGPRIdx /
+  //     SGPR0 + MaxSGPRIdx), so it is free on every out-edge by construction and
+  //     cannot clobber a sibling successor;
+  //   - V_SWAP_B32/XOR only touch the cycle's own registers, i.e. the copy
+  //     destinations, which the destination-clobber check below already covers.
+  // (This relies on resolvePermutation picking the scratch above the high-water
+  // mark; revisit this guard if that ever changes to reuse a lower free reg.)
+
+  // Sibling successors (usually one) and their entry slots.
+  SmallVector<SlotIndex, 2> SibStarts;
+  for (MachineBasicBlock *Succ : Pred->successors())
+    if (Succ != MBB)
+      SibStarts.push_back(LIS->getMBBStartIdx(Succ));
+  if (SibStarts.empty())
+    return false;
+
+  // Single ColorMap pass: the cheap reg-unit bit-test filters out the vast
+  // majority; only a color overlapping a destination pays for the liveAt query.
+  for (const auto &[VReg, PhysReg] : ColorMap) {
+    if (!Overlaps(PhysReg))
+      continue;
+    const LiveInterval &LI = LIS->getInterval(VReg);
+    for (SlotIndex S : SibStarts)
+      if (LI.liveAt(S))
+        return true; // a copy destination would clobber a sibling-live value
+  }
+
+  // Pre-existing physical-register live-ins of the siblings.
+  for (MachineBasicBlock *Succ : Pred->successors()) {
+    if (Succ == MBB)
+      continue;
+    for (const auto &LI : Succ->liveins())
+      if (Overlaps(LI.PhysReg))
+        return true;
+  }
+  return false;
+}
+
 void AMDGPUSSARegisterAllocator::color() {
   LLVM_DEBUG({
     dbgs() << "Coloring order (width descending):";
@@ -271,33 +330,59 @@ void AMDGPUSSARegisterAllocator::emitSwap(
   const TargetRegisterClass *RC = TRI->getPhysRegBaseClass(RegA);
   unsigned RegWidth = TRI->getRegSizeInBits(*RC);
 
-  if (RegWidth <= 32) {
-    if (ST->hasSwap()) {
-      BuildMI(MBB, InsertPt, DebugLoc(), TII->get(AMDGPU::V_SWAP_B32), RegA)
-          .addDef(RegB)
-          .addReg(RegB)
-          .addReg(RegA);
+  // In-place XOR swap: A ^= B; B ^= A; A ^= B.
+  auto EmitXorTriplet = [&](unsigned Opc) {
+    BuildMI(MBB, InsertPt, DebugLoc(), TII->get(Opc), RegA).addReg(RegA).addReg(RegB);
+    BuildMI(MBB, InsertPt, DebugLoc(), TII->get(Opc), RegB).addReg(RegA).addReg(RegB);
+    BuildMI(MBB, InsertPt, DebugLoc(), TII->get(Opc), RegA).addReg(RegA).addReg(RegB);
+  };
+
+  auto SwapInChunks = [&](unsigned ElemBytes) {
+    for (int16_t SubIdx : TRI->getRegSplitParts(RC, ElemBytes))
+      emitSwap(MBB, InsertPt, TRI->getSubReg(RegA, SubIdx),
+               TRI->getSubReg(RegB, SubIdx));
+  };
+
+  if (!TRI->isVGPRClass(RC)) {
+    // SGPR: no scalar swap instruction; use an S_XOR triplet with the widest
+    // available scalar XOR (B64 for 64-bit chunks, B32 otherwise). S_XOR writes
+    // SCC, so resolvePermutation only routes an SGPR cycle here when SCC is dead.
+    if (RegWidth == 32) {
+      EmitXorTriplet(AMDGPU::S_XOR_B32);
+    } else if (RegWidth == 64) {
+      EmitXorTriplet(AMDGPU::S_XOR_B64);
     } else {
-      BuildMI(MBB, InsertPt, DebugLoc(), TII->get(AMDGPU::V_XOR_B32_e64),
-              RegA)
-          .addReg(RegA).addReg(RegB);
-      BuildMI(MBB, InsertPt, DebugLoc(), TII->get(AMDGPU::V_XOR_B32_e64),
-              RegB)
-          .addReg(RegA).addReg(RegB);
-      BuildMI(MBB, InsertPt, DebugLoc(), TII->get(AMDGPU::V_XOR_B32_e64),
-              RegA)
-          .addReg(RegA).addReg(RegB);
+      // Wider: cover in aligned 64-bit chunks (S_XOR_B64), with a trailing
+      // 32-bit chunk (S_XOR_B32) for an odd dword count -- e.g. 96-bit -> one
+      // B64 (sub0_sub1) + one B32 (sub2).
+      unsigned NumDWords = RegWidth / 32;
+      unsigned Ch = 0;
+      for (; Ch + 2 <= NumDWords; Ch += 2) {
+        unsigned Sub = SIRegisterInfo::getSubRegFromChannel(Ch, 2);
+        emitSwap(MBB, InsertPt, TRI->getSubReg(RegA, Sub),
+                 TRI->getSubReg(RegB, Sub));
+      }
+      if (Ch < NumDWords) {
+        unsigned Sub = SIRegisterInfo::getSubRegFromChannel(Ch, 1);
+        emitSwap(MBB, InsertPt, TRI->getSubReg(RegA, Sub),
+                 TRI->getSubReg(RegB, Sub));
+      }
     }
     return;
   }
 
-  const unsigned DWordBytes = 4;
-  ArrayRef<int16_t> Parts = TRI->getRegSplitParts(RC, DWordBytes);
-  for (int16_t SubIdx : Parts) {
-    MCRegister SubA = TRI->getSubReg(RegA, SubIdx);
-    MCRegister SubB = TRI->getSubReg(RegB, SubIdx);
-    emitSwap(MBB, InsertPt, SubA, SubB);
+  // VGPR: only 32-bit swap primitives exist; decompose wider tuples.
+  if (RegWidth <= 32) {
+    if (ST->hasSwap())
+      BuildMI(MBB, InsertPt, DebugLoc(), TII->get(AMDGPU::V_SWAP_B32), RegA)
+          .addDef(RegB)
+          .addReg(RegB)
+          .addReg(RegA);
+    else
+      EmitXorTriplet(AMDGPU::V_XOR_B32_e64);
+    return;
   }
+  SwapInChunks(4);
 }
 
 void AMDGPUSSARegisterAllocator::resolvePermutation(
@@ -352,15 +437,34 @@ void AMDGPUSSARegisterAllocator::resolvePermutation(
         IsVGPR ? ST->getOccupancyWithNumVGPRs(MaxIdx, DynVGPRBlockSize)
                : ST->getOccupancyWithNumSGPRs(MaxIdx);
 
-    // Tier 1: scratch register if it doesn't reduce occupancy.
     // Scratch must match the cycle's register width.
     unsigned CycleWidth =
         TRI->getRegSizeInBits(*TRI->getPhysRegBaseClass(CycleStart)) / 32;
     unsigned ScratchOcc = IsVGPR
         ? ST->getOccupancyWithNumVGPRs(MaxIdx + CycleWidth, DynVGPRBlockSize)
         : ST->getOccupancyWithNumSGPRs(MaxIdx + CycleWidth);
+    bool ScratchFits = MaxIdx + CycleWidth <= MaxHWLimit;
 
-    if (ScratchOcc == CurrentOcc && MaxIdx + CycleWidth <= MaxHWLimit) {
+    // Decide between resolving the cycle with a scratch register (plain COPYs)
+    // and in place via emitSwap.
+    //   VGPR: emitSwap (V_SWAP_B32 or a V_XOR triplet) is scratch- and SCC-free,
+    //         so prefer it; use a scratch only when swap is unavailable and it
+    //         costs no occupancy.
+    //   SGPR: there is no scalar swap. emitSwap uses an S_XOR triplet, which
+    //         writes SCC and is therefore only safe when SCC is dead here.
+    //         Otherwise a scratch COPY is the only SCC-preserving option.
+    bool UseScratch;
+    if (IsVGPR) {
+      UseScratch = !ST->hasSwap() && ScratchOcc == CurrentOcc && ScratchFits;
+    } else {
+      bool SccDead = MBB.computeRegisterLiveness(TRI, AMDGPU::SCC, InsertPt) ==
+                     MachineBasicBlock::LQR_Dead;
+      UseScratch = !SccDead;
+      assert((!UseScratch || ScratchFits) &&
+             "SGPR permutation cycle with live SCC and no free scratch register");
+    }
+
+    if (UseScratch && ScratchFits) {
       MCRegister ScratchBase = IsVGPR
           ? MCRegister(AMDGPU::VGPR0 + MaxIdx)
           : MCRegister(AMDGPU::SGPR0 + MaxIdx);
@@ -401,10 +505,15 @@ void AMDGPUSSARegisterAllocator::resolvePermutation(
       continue;
     }
 
-    // Tier 2/3: break cycle pairwise with V_SWAP_B32 (GFX9+) or XOR.
-    // Collect the full cycle, then emit n-1 swaps from tail to head.
+    // Tier 2/3: break cycle pairwise, in place. emitSwap picks the right op per
+    // register file: VGPR -> V_SWAP_B32 (GFX9+) or a V_XOR triplet; SGPR -> an
+    // S_XOR triplet (only reached when SCC is dead, per the UseScratch decision
+    // above, since S_XOR writes SCC). Collect the full cycle, then emit n-1 swaps
+    // from tail to head.
     LLVM_DEBUG(dbgs() << "    cycle via "
-                      << (ST->hasSwap() ? "V_SWAP_B32" : "XOR") << ":\n");
+                      << (!IsVGPR ? "S_XOR"
+                                  : (ST->hasSwap() ? "V_SWAP_B32" : "V_XOR"))
+                      << ":\n");
     SmallVector<MCRegister> Cycle;
     MCRegister Cur = CycleStart;
     while (DstToSrc.count(Cur)) {
@@ -472,7 +581,7 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
 
     for (auto &[Pred, Copies] : PredCopies) {
       MachineBasicBlock *InsertMBB = Pred;
-      if (Pred->succ_size() > 1 && MBB.pred_size() > 1) {
+      if (edgeCopiesNeedSplit(Pred, &MBB, Copies)) {
         LLVM_DEBUG(dbgs() << "  Splitting critical edge "
                           << printMBBReference(*Pred) << " -> "
                           << printMBBReference(MBB) << "\n");

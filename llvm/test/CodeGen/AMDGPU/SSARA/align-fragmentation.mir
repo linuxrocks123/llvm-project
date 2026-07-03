@@ -28,13 +28,12 @@
 # CHECK: S_ENDPGM 0, implicit $vgpr2, implicit $vgpr0_vgpr1
 
 --- |
-  define amdgpu_kernel void @test_align_frag() #0 {
+  define amdgpu_kernel void @test_align_frag() {
   bb0:
     br label %bb1
   bb1:
     ret void
   }
-  attributes #0 = { "target-cpu"="gfx90a" }
 ...
 ---
 name:            test_align_frag

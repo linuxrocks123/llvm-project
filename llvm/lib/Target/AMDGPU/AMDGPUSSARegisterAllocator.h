@@ -55,6 +55,13 @@ class AMDGPUSSARegisterAllocator : public MachineFunctionPass {
   void classifyVRegs();
   void color();
   void seedOccupiedAtBBEntry(MachineBasicBlock *MBB);
+  // True if the parallel PHI edge-copies for Pred->MBB cannot be safely placed
+  // at Pred's terminator (they would clobber a value live into a sibling
+  // successor, or need a scratch register for a cycle), i.e. the critical edge
+  // must be split. A non-critical edge never needs splitting.
+  bool edgeCopiesNeedSplit(
+      MachineBasicBlock *Pred, MachineBasicBlock *MBB,
+      ArrayRef<std::pair<MCRegister, MCRegister>> Copies) const;
   void markOccupied(MCRegister PhysReg);
   void markFree(MCRegister PhysReg);
   MCRegister pickFreePhysReg(const TargetRegisterClass *RC,
