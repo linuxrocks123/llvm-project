@@ -215,52 +215,12 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   void spillBefore(MachineBasicBlock &MBB,
                    MachineBasicBlock::reverse_iterator I, VRegMaskPair VMP);
 
-  /// Emits a reload instruction before the given position (forward iterator).
-  /// Does NOT perform SSA repair - only emits the instruction and registers it.
-  /// Returns the reload instruction for later SSA repair.
-  MachineInstr *emitReload(MachineBasicBlock::iterator InsertBefore,
-                           VRegMaskPair VMP);
-
-  /// Repairs SSA form for a reload instruction using MachineLaneSSAUpdater.
-  /// Returns the new virtual register that holds the reloaded value.
-  Register repairSSAForReload(MachineInstr *ReloadMI, VRegMaskPair VMP);
-
-  /// Emits a reload instruction before the given position (forward iterator).
-  /// Returns the new virtual register that holds the reloaded value.
-  /// This is the primary reload method used during SSA repair.
-  /// Convenience wrapper that calls emitReload() + repairSSAForReload().
-  Register reloadBefore(MachineBasicBlock::iterator InsertBefore,
-                        VRegMaskPair VMP);
-
-  /// Emits a reload instruction at the end of a basic block (before
-  /// terminator). Returns the new virtual register that holds the reloaded
-  /// value.
-  Register reloadAtEnd(MachineBasicBlock &MBB, VRegMaskPair VMP);
-
   /// Build dom-groups for a register at spill decision time.
   void buildDomGroupsForSpill(SpillInfo &Info);
 
   /// Emits reloads and repairs SSA using IDF-first PHI insertion.
   /// Uses pre-built dom-groups from SpillInfo.
   void emitReloadsAndRepairSSA(SpillInfo &Info);
-
-  /// Process one PIDF block - insert PHI or reloads as needed.
-  /// Returns the inserted PHI instruction, or nullptr if no PHI was needed.
-  MachineInstr *processPIdfBlock(MachineBasicBlock *PIdfBB, VRegMaskPair SpilledVMP,
-                                 MachineBasicBlock *KillBB,
-                                 const SmallVectorImpl<DomGroup *> &Groups,
-                                 unsigned RPLimit);
-
-  /// Process kill-dominated groups using all DomGroups from Info.
-  void processKillDominatedGroups(SpillInfo &Info, MachineBasicBlock *KillBB,
-                                  unsigned RPLimit);
-
-  /// Process a list of kill-dominated groups.
-  void processKillDominatedGroupsWithList(const SmallVectorImpl<DomGroup *> &Groups,
-                                          VRegMaskPair SpilledVMP,
-                                          MachineBasicBlock *KillBB,
-                                          MachineInstr *KillMI,
-                                          unsigned RPLimit);
 
   /// Finalize live intervals after all reloads and use rewriting.
   void finalizeLiveIntervals(Register SpilledReg);
@@ -277,10 +237,6 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   /// For non-PHI uses, handles loop adjustment.
   bool insertReloadForUse(MachineInstr *UseMI, VRegMaskPair SpilledVMP,
                           MachineBasicBlock *KillBB);
-
-  /// Emit reload to a specific register.
-  MachineInstr *emitReloadToReg(MachineBasicBlock::iterator InsertBefore,
-                                 VRegMaskPair VMP, Register TargetReg);
 
   /// Sort PIDF blocks by dominance order.
   void sortByDominanceOrder(SmallVectorImpl<MachineBasicBlock *> &Blocks);
@@ -352,12 +308,6 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   optimizeReloadPlacing(const SmallVectorImpl<MachineInstr *> &GroupHeads,
                         unsigned RPLimit, Register SpilledReg);
   
-  /// Fix pathological PHIs that still use the spilled register.
-  /// In triangle/diamond CFGs, a PHI may merge a reloaded value with the
-  /// original spilled value. Replace such PHIs with reloads.
-  void fixPathologicalPHIs(VRegMaskPair SpilledVMP, int FrameIndex,
-                           MachineInstr *KillMI);
-
   // ============================================================================
   // Loop-Aware Spilling Helpers
   // ============================================================================

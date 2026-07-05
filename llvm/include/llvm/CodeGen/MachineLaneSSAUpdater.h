@@ -118,35 +118,8 @@ public:
                              MachineOperand &UseOp,
                              Register OrigVReg);
 
-  /// Get pruned IDF blocks for a definition (with caching).
-  /// 
-  /// Computes the Iterated Dominance Frontier (IDF) for DefBlock, pruned by
-  /// LiveInterval analysis (only includes blocks where OrigVReg lanes are live-in).
-  /// Results are cached to avoid redundant computation.
-  ///
-  /// \param OrigVReg - The register to analyze
-  /// \param DefMask - Lane mask of the definition
-  /// \param DefBlock - The definition block
-  /// \param OutIDFBlocks - Output vector of IDF blocks
-  void getPrunedIDF(Register OrigVReg,
-                    LaneBitmask DefMask,
-                    MachineBasicBlock *DefBlock,
-                    SmallVectorImpl<MachineBasicBlock *> &OutIDFBlocks);
-
   /// Clear the IDF cache. Call this if the CFG is modified.
   void clearIDFCache() { IDFCache.clear(); }
-
-  /// Insert a PHI at a join block with explicit incoming values.
-  ///
-  /// \param JoinBB - The block where the PHI will be inserted
-  /// \param OrigVReg - The original register being tracked
-  /// \param IncomingValues - Map from predecessor to incoming register
-  /// \param SpilledMask - Lane mask of the spilled register
-  /// \returns Pointer to the PHI result operand
-  MachineOperand *insertPHIAtBlock(MachineBasicBlock *JoinBB,
-                                   Register OrigVReg,
-                                   const DenseMap<MachineBasicBlock *, Register> &IncomingValues,
-                                   LaneBitmask SpilledMask);
 
   // Public cache key structure for DenseMapInfo specialization
   struct IDFCacheKey {
@@ -174,15 +147,6 @@ public:
                           LaneBitmask MaskToRewrite, MachineInstr *DefMI,
                           MachineInstr *UseMI, MachineOperand &MO,
                           LaneBitmask OpMask, LiveInterval &OrigLI);
-
-  /// Repair SSA for a reload instruction that already defines a new register.
-  /// This inserts PHIs at IDF blocks and rewrites dominated uses.
-  /// Use this when you've already created a reload that defines NewVReg.
-  /// Returns PHI def operands created during repair.
-  SmallVector<MachineOperand *, 4> repairSSAForReload(Register NewVReg,
-                                                       Register OrigVReg,
-                                                       LaneBitmask DefMask,
-                                                       MachineBasicBlock *DefBB);
 
 private:
   // Common SSA repair logic
@@ -217,21 +181,13 @@ private:
                         ArrayRef<MachineBasicBlock *> NewDefBlocks,
                         SmallVectorImpl<MachineBasicBlock *> &OutIDFBlocks);
 
-  // Insert lane-aware Machine PHIs with iterative worklist processing.
-  // Seeds with InitialVReg definition, computes IDF, places PHIs, repeats until convergence.
-  // Returns each PHI result operand paired with the OrigVReg lane it covers, so
-  // the caller can rewrite that PHI's uses with the correct per-PHI lane (the
-  // reaching path creates one PHI per subrange; legacy pairs use DefMask).
+  // Insert lane-aware Machine PHIs at the join points recorded as PHI-def
+  // VNInfos in OrigVReg's frozen interval (per lane, the pruned IDF that
+  // LiveIntervalCalc already computed). Returns each PHI result operand paired
+  // with the OrigVReg lane it covers, so the caller can rewrite that PHI's uses
+  // with the correct per-PHI lane (one PHI per subrange).
   SmallVector<std::pair<MachineOperand *, LaneBitmask>>
-  insertLaneAwarePHI(Register InitialVReg, Register OrigVReg, LaneBitmask DefMask,
-                     MachineBasicBlock *InitialDefBB);
-
-  // Helper: Create PHI in a specific block with per-edge lane analysis (legacy
-  // dominance-based path; used by the spiller until it is redesigned).
-  MachineOperand* createPHIInBlock(MachineBasicBlock &JoinMBB,
-                           Register OrigVReg,
-                           Register NewVReg,
-                           LaneBitmask DefMask);
+  insertLaneAwarePHI(Register OrigVReg, LaneBitmask DefMask);
 
   // Reaching-VNI path (approach A): create ONE PHI for a single lane group
   // (subrange-aligned \p Lane) at \p JoinMBB, resolving each predecessor operand
@@ -240,22 +196,13 @@ private:
   MachineOperand *createPHIInBlockReaching(MachineBasicBlock &JoinMBB,
                                            Register OrigVReg, LaneBitmask Lane);
 
-  // Resolve a PHI incoming value on the edge from \p PredMBB for OrigVReg's
-  // \p Mask lanes to a def renamed earlier in this repair session whose value
-  // is live out of \p PredMBB. Returns 0 if none. Avoids leaving an
-  // OrigVReg.subIdx placeholder that no later rewrite would patch.
-  Register findRenamedReachingDef(MachineBasicBlock *PredMBB, LaneBitmask Mask);
-
   // Cache for IDF computations to avoid redundant calculations
   DenseMap<IDFCacheKey, SmallVector<MachineBasicBlock *, 4>> IDFCache;
 
-  // Per-OrigVReg repair session: maps (def block, lanes) of OrigVReg to the SSA
-  // vreg the matching def was renamed to. OrigVReg is implicit (one session at a
-  // time); the def block keeps multiple renames of the same lane distinct (e.g.
-  // a loop-preheader init vs the in-loop redef). Reset when repairSSAForNewDef
-  // is first called for a different OrigVReg.
+  // Per-OrigVReg repair session key: reset when repairSSAForNewDef is first
+  // called for a different OrigVReg (the driver processes all defs of an
+  // OrigVReg before moving on).
   Register RenameSessionOrig;
-  DenseMap<std::pair<MachineBasicBlock *, LaneBitmask>, Register> RenamedLaneDefs;
 
   // A renamed def: the fresh SSA vreg plus the OrigVReg-namespace lanes it
   // covers. OrigLanes lets us rebase a target lane into VReg's own namespace to
@@ -267,14 +214,12 @@ private:
   };
 
   // Per-OrigVReg repair session: maps each renamed real (non-PHI) def
-  // instruction to its RenamedDef. Identity-keyed successor to RenamedLaneDefs:
-  // PHI-operand and use resolution map a reaching VNInfo to its def instruction
-  // and look it up here, avoiding the lane-coverage match and in-flight-liveness
-  // check that make RenamedLaneDefs unreliable mid-repair. Only real defs are
+  // instruction to its RenamedDef. PHI-operand and use resolution map a reaching
+  // VNInfo to its def instruction and look it up here. Only real defs are
   // stored; PHI-def reaching VNIs (block-boundary merges) are resolved via
   // placeholder-then-patch, so a MachineInstr* key suffices and is cheaper than
-  // SlotIndex (no DenseMapInfo<SlotIndex>, O(1), no node allocs). Reset together
-  // with RenamedLaneDefs.
+  // SlotIndex (no DenseMapInfo<SlotIndex>, O(1), no node allocs). Reset at the
+  // start of each session.
   DenseMap<MachineInstr *, RenamedDef> DefInstrToRenamed;
 
   // Frozen deep copy of OrigVReg's LiveInterval, taken at session start before
@@ -290,13 +235,6 @@ private:
   // PHI already built for a (join block, lane group) instead of creating a
   // duplicate when several defs share an IDF block. Reset per session.
   DenseMap<std::pair<MachineBasicBlock *, LaneBitmask>, Register> LanePHIs;
-
-  // TRANSIENT integration gate (removed once the spiller no longer calls the
-  // updater and only emits reload re-defs): true when entered via
-  // repairSSAForNewDef, where the frozen reaching oracle + DefInstrToRenamed are
-  // set up; false on the legacy repairSSAForReload path, which keeps the old
-  // dominance-based createPHIInBlock/rewriteDominatedUses behavior.
-  bool UseReachingOracle = false;
 
   // Reaching-def oracle (sound successor to dominance+order for lane decisions).
   // collectReachingVNIs: decompose \p Mask by OrigVReg's (old, still-valid)
@@ -319,7 +257,6 @@ private:
   const RenamedDef *renamedForReachingVNI(const VNInfo *V);
 
   // Internal helper methods for use rewriting
-  VNInfo *incomingOnEdge(LiveInterval &LI, MachineInstr *Phi, MachineOperand &PhiOp);
   bool defDominatesUse(MachineInstr *DefMI, MachineInstr *UseMI, MachineOperand &UseOp);
   bool defReachesUse(MachineInstr *DefMI, Register NewSSA, MachineInstr *UseMI, MachineOperand &UseOp);
   LaneBitmask operandLaneMask(const MachineOperand &MO);
