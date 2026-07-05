@@ -22,6 +22,8 @@
 #include "llvm/CodeGen/SlotIndexes.h"    // SlotIndex
 #include "llvm/CodeGen/TargetRegisterInfo.h" // For inline function
 #include "llvm/MC/LaneBitmask.h"        // LaneBitmask
+#include "llvm/Support/Allocator.h"      // BumpPtrAllocator (VNInfo::Allocator)
+#include <memory>                         // std::unique_ptr
 
 namespace llvm {
 
@@ -156,6 +158,16 @@ public:
                             Register NewSSA,
                             LaneBitmask MaskToRewrite);
 
+  /// Reaching-VNI path: rewrite a single use operand \p MO. Owns exactly the
+  /// \p OpMask lanes whose reaching value at the use is this def (\p DefMI /
+  /// \p NewSSA covering \p MaskToRewrite). Owned==OpMask -> direct NewSSA subreg;
+  /// partial -> REG_SEQUENCE (owned from NewSSA, rest OrigVReg placeholder);
+  /// none -> no change.
+  void rewriteUseReaching(Register OrigVReg, Register NewSSA,
+                          LaneBitmask MaskToRewrite, MachineInstr *DefMI,
+                          MachineInstr *UseMI, MachineOperand &MO,
+                          LaneBitmask OpMask, LiveInterval &OrigLI);
+
   /// Repair SSA for a reload instruction that already defines a new register.
   /// This inserts PHIs at IDF blocks and rewrites dominated uses.
   /// Use this when you've already created a reload that defines NewVReg.
@@ -200,17 +212,26 @@ private:
 
   // Insert lane-aware Machine PHIs with iterative worklist processing.
   // Seeds with InitialVReg definition, computes IDF, places PHIs, repeats until convergence.
-  // Returns all PHI result registers created during the iteration.
-  SmallVector<MachineOperand*> insertLaneAwarePHI(Register InitialVReg,
-                                            Register OrigVReg,
-                                            LaneBitmask DefMask,
-                                            MachineBasicBlock *InitialDefBB);
+  // Returns each PHI result operand paired with the OrigVReg lane it covers, so
+  // the caller can rewrite that PHI's uses with the correct per-PHI lane (the
+  // reaching path creates one PHI per subrange; legacy pairs use DefMask).
+  SmallVector<std::pair<MachineOperand *, LaneBitmask>>
+  insertLaneAwarePHI(Register InitialVReg, Register OrigVReg, LaneBitmask DefMask,
+                     MachineBasicBlock *InitialDefBB);
 
-  // Helper: Create PHI in a specific block with per-edge lane analysis
+  // Helper: Create PHI in a specific block with per-edge lane analysis (legacy
+  // dominance-based path; used by the spiller until it is redesigned).
   MachineOperand* createPHIInBlock(MachineBasicBlock &JoinMBB,
                            Register OrigVReg,
                            Register NewVReg,
                            LaneBitmask DefMask);
+
+  // Reaching-VNI path (approach A): create ONE PHI for a single lane group
+  // (subrange-aligned \p Lane) at \p JoinMBB, resolving each predecessor operand
+  // from the frozen OrigVReg reaching oracle (single source or OrigVReg
+  // placeholder). Dedups via LanePHIs. Returns the PHI result operand.
+  MachineOperand *createPHIInBlockReaching(MachineBasicBlock &JoinMBB,
+                                           Register OrigVReg, LaneBitmask Lane);
 
   // Resolve a PHI incoming value on the edge from \p PredMBB for OrigVReg's
   // \p Mask lanes to a def renamed earlier in this repair session whose value
@@ -228,6 +249,67 @@ private:
   // is first called for a different OrigVReg.
   Register RenameSessionOrig;
   DenseMap<std::pair<MachineBasicBlock *, LaneBitmask>, Register> RenamedLaneDefs;
+
+  // A renamed def: the fresh SSA vreg plus the OrigVReg-namespace lanes it
+  // covers. OrigLanes lets us rebase a target lane into VReg's own namespace to
+  // extract the right subreg when VReg is wider than the queried lane (e.g. a
+  // full def feeding a sub0 PHI operand).
+  struct RenamedDef {
+    Register VReg;
+    LaneBitmask OrigLanes;
+  };
+
+  // Per-OrigVReg repair session: maps each renamed real (non-PHI) def
+  // instruction to its RenamedDef. Identity-keyed successor to RenamedLaneDefs:
+  // PHI-operand and use resolution map a reaching VNInfo to its def instruction
+  // and look it up here, avoiding the lane-coverage match and in-flight-liveness
+  // check that make RenamedLaneDefs unreliable mid-repair. Only real defs are
+  // stored; PHI-def reaching VNIs (block-boundary merges) are resolved via
+  // placeholder-then-patch, so a MachineInstr* key suffices and is cheaper than
+  // SlotIndex (no DenseMapInfo<SlotIndex>, O(1), no node allocs). Reset together
+  // with RenamedLaneDefs.
+  DenseMap<MachineInstr *, RenamedDef> DefInstrToRenamed;
+
+  // Frozen deep copy of OrigVReg's LiveInterval, taken at session start before
+  // any rename: the STABLE reaching-def oracle. Renames done during the session
+  // strip renamed defs' VNInfos from the live LIS interval, so reaching queries
+  // must run against this frozen copy instead. Rebuilt each session; VNInfos are
+  // owned by FrozenAlloc (def SlotIndexes and isPHIDef are preserved by the
+  // copy, which is all the lookup needs).
+  BumpPtrAllocator FrozenAlloc;
+  std::unique_ptr<LiveInterval> FrozenOrigLI;
+
+  // Dedup for the reaching-VNI path's per-subrange PHIs (approach A): reuse the
+  // PHI already built for a (join block, lane group) instead of creating a
+  // duplicate when several defs share an IDF block. Reset per session.
+  DenseMap<std::pair<MachineBasicBlock *, LaneBitmask>, Register> LanePHIs;
+
+  // TRANSIENT integration gate (removed once the spiller no longer calls the
+  // updater and only emits reload re-defs): true when entered via
+  // repairSSAForNewDef, where the frozen reaching oracle + DefInstrToRenamed are
+  // set up; false on the legacy repairSSAForReload path, which keeps the old
+  // dominance-based createPHIInBlock/rewriteDominatedUses behavior.
+  bool UseReachingOracle = false;
+
+  // Reaching-def oracle (sound successor to dominance+order for lane decisions).
+  // collectReachingVNIs: decompose \p Mask by OrigVReg's (old, still-valid)
+  // LiveInterval subranges and append, for each covered piece, {laneSubmask,
+  // reaching VNInfo at \p Idx}. The pieces partition \p Mask, so a caller can
+  // use a single value when one piece covers all of Mask, or build a
+  // REG_SEQUENCE across pieces otherwise. A null VNInfo means that piece's lanes
+  // are dead at \p Idx. For a reg without subranges, returns one {Mask, mainVNI}.
+  void collectReachingVNIs(
+      LiveInterval &OrigLI, LaneBitmask Mask, SlotIndex Idx,
+      SmallVectorImpl<std::pair<LaneBitmask, VNInfo *>> &Out);
+  // Convenience wrapper for a single subrange-aligned lane group: returns the
+  // one reaching VNInfo at \p Idx (null if the lane is dead there). Asserts if
+  // \p Lane straddles subranges (which would yield more than one piece).
+  VNInfo *reachingVNIForLaneGroup(LiveInterval &OrigLI, LaneBitmask Lane,
+                                  SlotIndex Idx);
+  // renamedForReachingVNI: map a reaching VNInfo to the RenamedDef its def was
+  // renamed to this session, or null if it is a PHI-def merge or has not been
+  // renamed (caller then leaves an OrigVReg placeholder to be patched later).
+  const RenamedDef *renamedForReachingVNI(const VNInfo *V);
 
   // Internal helper methods for use rewriting
   VNInfo *incomingOnEdge(LiveInterval &LI, MachineInstr *Phi, MachineOperand &PhiOp);

@@ -60,9 +60,28 @@ Register MachineLaneSSAUpdater::repairSSAForNewDef(
 
   // Scope the rename map to one OrigVReg. The driver processes all defs of an
   // OrigVReg before moving on, so clearing on change is sufficient.
+  // Rebuild path: the reaching-VNI oracle is set up below.
+  UseReachingOracle = true;
+
   if (RenameSessionOrig != OrigVReg) {
     RenameSessionOrig = OrigVReg;
     RenamedLaneDefs.clear();
+    DefInstrToRenamed.clear();
+    LanePHIs.clear();
+
+    // Freeze a deep copy of OrigVReg's original LiveInterval as the reaching-def
+    // oracle for this session. Must be taken BEFORE any def is renamed, since
+    // renaming (in place) removes that def's VNInfo from the live OrigVReg
+    // interval when it is later recomputed. The copy preserves each VNInfo's def
+    // SlotIndex and isPHIDef flag, which is all reaching resolution needs.
+    FrozenAlloc.Reset();
+    FrozenOrigLI = std::make_unique<LiveInterval>(OrigVReg, 0.0f);
+    if (LIS.hasInterval(OrigVReg)) {
+      LiveInterval &Src = LIS.getInterval(OrigVReg);
+      FrozenOrigLI->assign(Src, FrozenAlloc);
+      for (const LiveInterval::SubRange &S : Src.subranges())
+        FrozenOrigLI->createSubRangeFrom(FrozenAlloc, S.LaneMask, S);
+    }
   }
 
   // Step 1: Find the def operand for OrigVReg
@@ -131,6 +150,11 @@ Register MachineLaneSSAUpdater::repairSSAForNewDef(
   // instead of an OrigVReg.subIdx placeholder.
   RenamedLaneDefs[{NewDefMI.getParent(), DefMask}] = NewSSAVReg;
 
+  // Identity-keyed successor to RenamedLaneDefs: record the renamed def by its
+  // instruction (with the OrigVReg lanes it covers), so reaching-VNInfo lookups
+  // can map a reaching real def to its renamed vreg and rebase target lanes.
+  DefInstrToRenamed[&NewDefMI] = {NewSSAVReg, DefMask};
+
   // Step 6: Perform common SSA repair (PHI placement + use rewriting)
   // LiveInterval for NewSSAVReg will be created by getInterval() as needed
   PHIRegDefOps = performSSARepair(NewSSAVReg, OrigVReg, DefMask, NewDefMI.getParent());
@@ -175,23 +199,25 @@ MachineLaneSSAUpdater::performSSARepair(Register NewVReg, Register OrigVReg,
   LLVM_DEBUG(dbgs() << "MachineLaneSSAUpdater::performSSARepair NewVReg=" << NewVReg
                     << " OrigVReg=" << OrigVReg << " DefMask=" << PrintLaneMask(DefMask) << "\n");
   
-  // Step 1: Use worklist-driven PHI placement
-  SmallVector<MachineOperand *> AllPHIVResults =
+  // Step 1: Use worklist-driven PHI placement. Each PHI is paired with the
+  // OrigVReg lane it covers.
+  SmallVector<std::pair<MachineOperand *, LaneBitmask>> AllPHIVResults =
       insertLaneAwarePHI(NewVReg, OrigVReg, DefMask, DefBB);
 
-  // Step 2: Rewrite dominated uses once for each new register
+  // Step 2: Rewrite dominated uses once for each new register. Each PHI is
+  // rewritten with ITS OWN lane (per-subrange in the reaching path; DefMask in
+  // the legacy path) so subreg rebasing is correct.
   // Note: getInterval() will automatically create LiveIntervals if needed
   rewriteDominatedUses(OrigVReg, NewVReg, DefMask);
-  for (MachineOperand* PHIVRes : AllPHIVResults) {
-    rewriteDominatedUses(OrigVReg, PHIVRes->getReg(), DefMask);
-  }
+  for (auto &[PHIVRes, Lane] : AllPHIVResults)
+    rewriteDominatedUses(OrigVReg, PHIVRes->getReg(), Lane);
   
   // Step 3: Renumber values if needed
   LiveInterval &NewLI = LIS.getInterval(NewVReg);
   NewLI.RenumberValues();
   
   // Also renumber PHI intervals
-  for (MachineOperand* PHIVRes : AllPHIVResults) {
+  for (auto &[PHIVRes, Lane] : AllPHIVResults) {
     LiveInterval &PHILI = LIS.getInterval(PHIVRes->getReg());
     PHILI.RenumberValues();
   }
@@ -215,9 +241,8 @@ MachineLaneSSAUpdater::performSSARepair(Register NewVReg, Register OrigVReg,
   
   // Step 4: Update operand flags to match the LiveIntervals
   updateDeadFlags(NewVReg);
-  for (MachineOperand* PHIVRes : AllPHIVResults) {
+  for (auto &[PHIVRes, Lane] : AllPHIVResults)
     updateDeadFlags(PHIVRes->getReg());
-  }
   
   // Step 5: Verification if enabled
   if (VerifyOnExit) {
@@ -226,7 +251,10 @@ MachineLaneSSAUpdater::performSSARepair(Register NewVReg, Register OrigVReg,
   }
   
   LLVM_DEBUG(dbgs() << "  performSSARepair complete\n");
-  return AllPHIVResults;
+  SmallVector<MachineOperand *> Results;
+  for (auto &[PHIVRes, Lane] : AllPHIVResults)
+    Results.push_back(PHIVRes);
+  return Results;
 }
 
 //===----------------------------------------------------------------------===//
@@ -423,7 +451,7 @@ void MachineLaneSSAUpdater::computePrunedIDF(Register OrigVReg,
   IDF.calculate(OutIDFBlocks);
   
   LLVM_DEBUG(dbgs() << "  Computed " << OutIDFBlocks.size() << " IDF blocks\n");
-  
+
   // Store in cache if this was a single-block definition
   if (NewDefBlocks.size() == 1 && NewDefBlocks[0]) {
     IDFCacheKey Key{OrigVReg, DefMask, static_cast<unsigned>(NewDefBlocks[0]->getNumber())};
@@ -434,28 +462,59 @@ void MachineLaneSSAUpdater::computePrunedIDF(Register OrigVReg,
   // join blocks. The IDFCalculator handles deduplication automatically.
 }
 
-SmallVector<MachineOperand *> MachineLaneSSAUpdater::insertLaneAwarePHI(
-    Register InitialVReg, Register OrigVReg, LaneBitmask DefMask,
-    MachineBasicBlock *InitialDefBB) {
+SmallVector<std::pair<MachineOperand *, LaneBitmask>>
+MachineLaneSSAUpdater::insertLaneAwarePHI(Register InitialVReg, Register OrigVReg,
+                                          LaneBitmask DefMask,
+                                          MachineBasicBlock *InitialDefBB) {
   LLVM_DEBUG(dbgs() << "MachineLaneSSAUpdater::insertLaneAwarePHI InitialVReg=" << InitialVReg
                     << " OrigVReg=" << OrigVReg << " DefMask=" << PrintLaneMask(DefMask) << "\n");
   
-  SmallVector<MachineOperand*> AllCreatedPHIs;
-  
-  // Step 1: Compute IDF (Iterated Dominance Frontier) for the initial definition
-  // This gives us ALL blocks where PHI nodes need to be inserted
+  SmallVector<std::pair<MachineOperand *, LaneBitmask>> AllCreatedPHIs;
+
+  // Reaching-VNI path (full-rebuild): PHIs go exactly at the join points already
+  // recorded in OrigVReg's frozen interval as PHI-def VNInfos. LiveIntervalCalc
+  // computed those when the interval was built, so per lane they ARE the pruned
+  // iterated dominance frontier -- no IDF recomputation needed. Dead lanes (no
+  // merge) have no PHI-def VNInfo, so they correctly get no PHI. Operands are
+  // resolved from the frozen reaching oracle (placeholder-then-patch).
+  if (UseReachingOracle) {
+    auto placePHIsFor = [&](const LiveRange &LR, LaneBitmask Lane) {
+      for (const VNInfo *VNI : LR.valnos) {
+        if (!VNI || VNI->isUnused() || !VNI->isPHIDef())
+          continue;
+        MachineBasicBlock *JoinMBB = LIS.getMBBFromIndex(VNI->def);
+        if (!JoinMBB)
+          continue;
+        if (MachineOperand *PHIResult =
+                createPHIInBlockReaching(*JoinMBB, OrigVReg, Lane))
+          AllCreatedPHIs.push_back({PHIResult, Lane});
+      }
+    };
+    if (FrozenOrigLI) {
+      if (FrozenOrigLI->hasSubRanges()) {
+        for (const LiveInterval::SubRange &S : FrozenOrigLI->subranges())
+          if ((S.LaneMask & DefMask).any())
+            placePHIsFor(S, S.LaneMask);
+      } else {
+        placePHIsFor(*FrozenOrigLI, DefMask);
+      }
+    }
+    LLVM_DEBUG(dbgs() << "  PHI insertion complete. Created "
+                      << AllCreatedPHIs.size() << " PHI registers total.\n");
+    return AllCreatedPHIs;
+  }
+
+  // Legacy dominance-based path (spiller): reload defs are NOT in OrigVReg's
+  // interval, so PHI-def VNInfos cannot drive placement -- compute the IDF here
+  // and chain CurrentNewVReg for iterated PHIs.
   SmallVector<MachineBasicBlock *> DefBlocks = {InitialDefBB};
   SmallVector<MachineBasicBlock *> IDFBlocks;
   computePrunedIDF(OrigVReg, DefMask, DefBlocks, IDFBlocks);
-  
-  LLVM_DEBUG(dbgs() << "  Computed IDF: found " << IDFBlocks.size() << " blocks needing PHIs\n");
-  for (MachineBasicBlock *MBB : IDFBlocks) {
+  LLVM_DEBUG(dbgs() << "  Computed IDF: found " << IDFBlocks.size()
+                    << " blocks needing PHIs\n");
+  for (MachineBasicBlock *MBB : IDFBlocks)
     LLVM_DEBUG(dbgs() << "    BB#" << MBB->getNumber() << "\n");
-  }
-  
-  // Step 2: Iterate through IDF blocks sequentially, creating PHIs
-  // Key insight: After creating a PHI, update NewVReg to the PHI result
-  // so subsequent PHIs use the correct register
+
   Register CurrentNewVReg = InitialVReg;
   
   for (MachineBasicBlock *JoinMBB : IDFBlocks) {
@@ -466,7 +525,7 @@ SmallVector<MachineOperand *> MachineLaneSSAUpdater::insertLaneAwarePHI(
     MachineOperand* PHIResult = createPHIInBlock(*JoinMBB, OrigVReg, CurrentNewVReg, DefMask);
     
     if (PHIResult) {
-      AllCreatedPHIs.push_back(PHIResult);
+      AllCreatedPHIs.push_back({PHIResult, DefMask});
       
       // Update CurrentNewVReg to be the PHI result
       // This ensures the next PHI (if any) uses this PHI's result, not the original InitialVReg
@@ -481,6 +540,63 @@ SmallVector<MachineOperand *> MachineLaneSSAUpdater::insertLaneAwarePHI(
                     << AllCreatedPHIs.size() << " PHI registers total.\n");
   
   return AllCreatedPHIs;
+}
+
+// Reaching-VNI path (approach A): one PHI for a single subrange-aligned lane
+// group. Every predecessor operand has exactly one reaching piece -> a single
+// source (renamed reaching def) or an OrigVReg.subIdx placeholder patched later.
+MachineOperand *
+MachineLaneSSAUpdater::createPHIInBlockReaching(MachineBasicBlock &JoinMBB,
+                                                Register OrigVReg,
+                                                LaneBitmask Lane) {
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+  const TargetRegisterClass *OrigRC = MRI.getRegClass(OrigVReg);
+  const LaneBitmask FullMask = MRI.getMaxLaneMaskForVReg(OrigVReg);
+
+  // Dedup: reuse a PHI already built for this (block, lane) this session.
+  auto Key = std::make_pair(&JoinMBB, Lane);
+  if (Register Existing = LanePHIs.lookup(Key))
+    return &MRI.getVRegDef(Existing)->getOperand(0);
+
+  // PHI result class = subregister class for Lane (full reg when Lane == full).
+  const TargetRegisterClass *RC = OrigRC;
+  unsigned LaneSub = (Lane == FullMask) ? 0 : getSubRegIndexForLaneMask(Lane, &TRI);
+  if (LaneSub)
+    if (const TargetRegisterClass *SubRC = TRI.getSubRegisterClass(OrigRC, LaneSub))
+      RC = SubRC;
+
+  Register PHIVReg = MRI.createVirtualRegister(RC);
+  auto PHINode = BuildMI(JoinMBB, JoinMBB.begin(), DebugLoc(),
+                         TII->get(TargetOpcode::PHI), PHIVReg);
+  LLVM_DEBUG(dbgs() << "    createPHIInBlockReaching in BB#" << JoinMBB.getNumber()
+                    << " OrigVReg=" << printReg(OrigVReg, &TRI)
+                    << " Lane=" << PrintLaneMask(Lane) << " -> " << PHIVReg << "\n");
+
+  for (MachineBasicBlock *Pred : JoinMBB.predecessors()) {
+    SlotIndex EndP = LIS.getMBBEndIdx(Pred);
+    VNInfo *V = reachingVNIForLaneGroup(*FrozenOrigLI, Lane, EndP);
+
+    if (const RenamedDef *RD = renamedForReachingVNI(V)) {
+      // Extract Lane from the renamed vreg: rebase Lane into its namespace.
+      LaneBitmask RLane = rebaseLaneMask(Lane, RD->OrigLanes);
+      LaneBitmask RFull = MRI.getMaxLaneMaskForVReg(RD->VReg);
+      unsigned Sub = (RLane == RFull) ? 0 : getSubRegIndexForLaneMask(RLane, &TRI);
+      PHINode.addReg(RD->VReg, 0, Sub);
+    } else {
+      // Placeholder: Root value (final) or a not-yet-materialized value patched
+      // later by its owner's rewriteDominatedUses.
+      unsigned Sub = (Lane == FullMask) ? 0 : getSubRegIndexForLaneMask(Lane, &TRI);
+      PHINode.addReg(OrigVReg, 0, Sub);
+    }
+    PHINode.addMBB(Pred);
+  }
+
+  MachineInstr *PHI = PHINode.getInstr();
+  LIS.InsertMachineInstrInMaps(*PHI);
+  LanePHIs[Key] = PHIVReg;
+  LLVM_DEBUG(dbgs() << "      Created: "; PHI->print(dbgs()));
+  return &PHI->getOperand(0);
 }
 
 // Helper: Create lane-specific PHI in a join block
@@ -596,6 +712,94 @@ MachineLaneSSAUpdater::createPHIInBlock(MachineBasicBlock &JoinMBB,
   return nullptr;
 }
 
+void MachineLaneSSAUpdater::rewriteUseReaching(
+    Register OrigVReg, Register NewSSA, LaneBitmask MaskToRewrite,
+    MachineInstr *DefMI, MachineInstr *UseMI, MachineOperand &MO,
+    LaneBitmask OpMask, LiveInterval &OrigLI) {
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+
+  // Point at which we query the reaching value: end of the predecessor for a PHI
+  // operand, the use instruction otherwise.
+  SlotIndex UsePt;
+  if (UseMI->isPHI()) {
+    unsigned OpIdx = UseMI->getOperandNo(&MO);
+    MachineBasicBlock *Pred = UseMI->getOperand(OpIdx + 1).getMBB();
+    UsePt = LIS.getMBBEndIdx(Pred);
+  } else {
+    UsePt = LIS.getInstructionIndex(*UseMI).getRegSlot();
+  }
+
+  // Lanes (within MaskToRewrite) whose reaching value at the use IS this def.
+  // A real (non-PHI) def matches the frozen VNInfo at its slot; an inserted PHI
+  // result matches the frozen PHI-def VNInfo at the PHI's block (the frozen LI
+  // predates our PHIs and records merges as block-boundary PHI-defs, so PHI
+  // results can't be matched by instruction slot).
+  const bool DefIsPHI = DefMI->isPHI();
+  MachineBasicBlock *DefBB = DefMI->getParent();
+  // A real def's VNInfo sits at the early-clobber slot iff its def operand is
+  // early-clobber (e.g. S_LOAD_..._ec); otherwise at the regular slot. Use the
+  // exact slot so we match only THIS def, never another def on the same instr.
+  SlotIndex DefSlot;
+  if (!DefIsPHI) {
+    bool EC = false;
+    for (const MachineOperand &D : DefMI->defs())
+      if (D.getReg() == NewSSA) {
+        EC = D.isEarlyClobber();
+        break;
+      }
+    DefSlot = LIS.getInstructionIndex(*DefMI).getRegSlot(EC);
+  }
+  SmallVector<std::pair<LaneBitmask, VNInfo *>, 4> Pieces;
+  collectReachingVNIs(*FrozenOrigLI, OpMask & MaskToRewrite, UsePt, Pieces);
+  LaneBitmask Owned = LaneBitmask::getNone();
+  for (auto &[L, V] : Pieces) {
+    if (!V)
+      continue;
+    bool Match = DefIsPHI ? (V->isPHIDef() && LIS.getMBBFromIndex(V->def) == DefBB)
+                          : (!V->isPHIDef() && V->def == DefSlot);
+    if (Match)
+      Owned |= L;
+  }
+
+  if (Owned.none())
+    return; // this def provides none of the use's lanes; owner patches later
+
+  LLVM_DEBUG(dbgs() << "    [reaching] use OpMask=" << PrintLaneMask(OpMask)
+                    << " Owned=" << PrintLaneMask(Owned) << ": ";
+             UseMI->print(dbgs()));
+
+  if (Owned == OpMask) {
+    // Whole operand provided by this def: use NewSSA with OpMask's subreg
+    // (rebased into NewSSA's namespace; 0 when it is the full register).
+    LaneBitmask NewLanes = rebaseLaneMask(OpMask, MaskToRewrite);
+    LaneBitmask NewFull = MRI.getMaxLaneMaskForVReg(NewSSA);
+    unsigned Sub =
+        (NewLanes == NewFull) ? 0 : getSubRegIndexForLaneMask(NewLanes, &TRI);
+    MO.setReg(NewSSA);
+    MO.setSubReg(Sub);
+    return;
+  }
+
+  // Partial: compose Owned lanes from NewSSA; the remaining lanes stay OrigVReg
+  // (Root/final or a placeholder patched by their owner). REG_SEQUENCE result is
+  // sized to the use's lanes as a whole register.
+  // The RS result is a whole register sized to the use's lanes. The operand
+  // already names those lanes via its subreg, so take its class directly.
+  const TargetRegisterClass *OpRC = MRI.getRegClass(MO.getReg());
+  const TargetRegisterClass *UseRC =
+      MO.getSubReg() ? TRI.getSubRegisterClass(OpRC, MO.getSubReg()) : OpRC;
+  assert(UseRC && "use operand subreg has no register class");
+  SmallVector<LaneBitmask, 4> LanesToExtend;
+  SlotIndex RSIdx;
+  Register RSReg = buildRSForSuperUse(UseMI, MO, OrigVReg, NewSSA, Owned, OrigLI,
+                                      UseRC, RSIdx, LanesToExtend);
+  extendAt(OrigLI, RSIdx, LanesToExtend);
+  MO.setReg(RSReg);
+  MO.setSubReg(0);
+  LIS.extendToIndices(LIS.getInterval(RSReg), {UsePt});
+  updateDeadFlags(RSReg);
+}
+
 void MachineLaneSSAUpdater::rewriteDominatedUses(Register OrigVReg,
                                                   Register NewSSA,
                                                   LaneBitmask MaskToRewrite) {
@@ -628,14 +832,23 @@ void MachineLaneSSAUpdater::rewriteDominatedUses(Register OrigVReg,
     if (UseMI == DefMI)
       continue;
 
-    // Check if this use is DOMINATED by our definition
-    // Reachable-but-not-dominated uses should use PHI results, not NewSSA directly
-    if (!defDominatesUse(DefMI, UseMI, MO))
-      continue;
-
     // Get the lane mask for this operand
     LaneBitmask OpMask = operandLaneMask(MO);
     if ((OpMask & MaskToRewrite).none())
+      continue;
+
+    // Reaching-VNI ownership (rebuild path): this def owns exactly the OpMask
+    // lanes whose reaching value at the use is this def's own VNInfo. Replaces
+    // the block-dominance filter, which over-/under-claimed lanes (Bucket 3).
+    if (UseReachingOracle) {
+      rewriteUseReaching(OrigVReg, NewSSA, MaskToRewrite, DefMI, UseMI, MO,
+                         OpMask, OrigLI);
+      continue;
+    }
+
+    // Legacy dominance-based path (spiller):
+    // Reachable-but-not-dominated uses should use PHI results, not NewSSA directly
+    if (!defDominatesUse(DefMI, UseMI, MO))
       continue;
 
     LLVM_DEBUG(dbgs() << "    Processing use with OpMask=" << PrintLaneMask(OpMask) << ": ");
@@ -761,12 +974,60 @@ SmallVector<MachineOperand *, 4> MachineLaneSSAUpdater::repairSSAForReload(
                     << NewVReg << " OrigVReg=" << OrigVReg
                     << " DefMask=" << PrintLaneMask(DefMask)
                     << " DefBB=BB#" << DefBB->getNumber() << "\n");
+  // Legacy dominance-based path (spiller). Removed once the spiller emits reload
+  // re-defs and lets RebuildSSA reconstruct instead of calling the updater.
+  UseReachingOracle = false;
   return performSSARepair(NewVReg, OrigVReg, DefMask, DefBB);
 }
 
 //===----------------------------------------------------------------------===//
 // Internal helpers
 //===----------------------------------------------------------------------===//
+
+/// Decompose \p Mask by OrigVReg's subranges and append {laneSubmask, reaching
+/// VNInfo at \p Idx} per covered piece. Pieces partition \p Mask (subranges
+/// partition all lanes), so the caller uses a single value when one piece covers
+/// all of Mask, else composes a REG_SEQUENCE. A null VNInfo means dead lanes.
+/// A reg without subranges yields one {Mask, mainVNI}.
+void MachineLaneSSAUpdater::collectReachingVNIs(
+    LiveInterval &OrigLI, LaneBitmask Mask, SlotIndex Idx,
+    SmallVectorImpl<std::pair<LaneBitmask, VNInfo *>> &Out) {
+  if (OrigLI.hasSubRanges()) {
+    for (const LiveInterval::SubRange &S : OrigLI.subranges()) {
+      LaneBitmask Piece = S.LaneMask & Mask;
+      if (Piece.none())
+        continue;
+      Out.push_back({Piece, S.getVNInfoBefore(Idx)});
+    }
+    return;
+  }
+  Out.push_back({Mask, OrigLI.getVNInfoBefore(Idx)});
+}
+
+VNInfo *MachineLaneSSAUpdater::reachingVNIForLaneGroup(LiveInterval &OrigLI,
+                                                       LaneBitmask Lane,
+                                                       SlotIndex Idx) {
+  SmallVector<std::pair<LaneBitmask, VNInfo *>, 2> Pieces;
+  collectReachingVNIs(OrigLI, Lane, Idx, Pieces);
+  assert(Pieces.size() <= 1 &&
+         "reachingVNIForLaneGroup: lane group must lie within one subrange");
+  return Pieces.empty() ? nullptr : Pieces.front().second;
+}
+
+/// Map a reaching VNInfo to the RenamedDef its def was renamed to this session.
+/// Returns null when the value is a PHI-def merge (resolved via placeholder-
+/// then-patch) or when the def has not (yet) been renamed, so the caller keeps
+/// an OrigVReg placeholder that a later repair patches.
+const MachineLaneSSAUpdater::RenamedDef *
+MachineLaneSSAUpdater::renamedForReachingVNI(const VNInfo *V) {
+  if (!V || V->isUnused() || V->isPHIDef())
+    return nullptr;
+  MachineInstr *DefMI = LIS.getInstructionFromIndex(V->def);
+  if (!DefMI)
+    return nullptr;
+  auto It = DefInstrToRenamed.find(DefMI);
+  return It != DefInstrToRenamed.end() ? &It->second : nullptr;
+}
 
 /// Return the VNInfo reaching this PHI operand along its predecessor edge.
 VNInfo *MachineLaneSSAUpdater::incomingOnEdge(LiveInterval &LI, MachineInstr *Phi,
