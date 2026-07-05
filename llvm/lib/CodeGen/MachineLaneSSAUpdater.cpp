@@ -74,6 +74,10 @@ Register MachineLaneSSAUpdater::repairSSAForNewDef(
     // renaming (in place) removes that def's VNInfo from the live OrigVReg
     // interval when it is later recomputed. The copy preserves each VNInfo's def
     // SlotIndex and isPHIDef flag, which is all reaching resolution needs.
+    // Destroy the previous frozen interval BEFORE reclaiming its backing
+    // allocator: its subranges live in FrozenAlloc, so resetting the allocator
+    // first makes the old interval's destructor double-free them.
+    FrozenOrigLI.reset();
     FrozenAlloc.Reset();
     FrozenOrigLI = std::make_unique<LiveInterval>(OrigVReg, 0.0f);
     if (LIS.hasInterval(OrigVReg)) {
