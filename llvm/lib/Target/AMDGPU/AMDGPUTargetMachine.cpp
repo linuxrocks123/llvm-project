@@ -1716,6 +1716,11 @@ bool GCNPassConfig::addRegAssignAndRewriteOptimized() {
   if (EnableSSARegAlloc) {
     addPass(createAMDGPURebuildSSALegacyPass());
     addPass(createAMDGPUSSARegisterSpillerPass());
+    // Second reconstruction: the spiller emits reloads that redefine OrigVReg
+    // (Option 3), leaving non-SSA MIR; rebuild repairs it via the reaching-VNI
+    // oracle. No-op until the spiller is switched to reload-as-redef, since
+    // RebuildSSA early-outs when the function is already SSA.
+    addPass(createAMDGPURebuildSSALegacyPass());
     addPass(createAMDGPUSSARegisterAllocatorPass());
     return true;
   }
