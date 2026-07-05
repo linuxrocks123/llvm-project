@@ -1,7 +1,8 @@
 # RUN: llc -mtriple=amdgcn-amd-amdhsa -mcpu=gfx1200 -amdgpu-ssa-spill-markers \
 # RUN:   -verify-machineinstrs -run-pass=amdgpu-ssa-register-spiller -o - %s | FileCheck %s
-# XFAIL: *
-# FIXME: Same as spill-loop-skip-def-inside — no spill candidates after loop filter; validateFinalRP.
+# Fixed by the inline reaching-repair spiller redesign: %good is spilled at its
+# def and reloaded inside the loop body (hoist to preheader correctly rejected
+# because it would exceed the RP limit), keeping final RP within budget.
 
 # Test: Fallback - reload stays inside loop when hoisting would exceed RP
 #

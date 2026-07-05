@@ -81,6 +81,13 @@ public:
   Register repairSSAForNewDef(MachineInstr &NewDefMI, Register OrigVReg,
                               SmallVectorImpl<MachineOperand *> &PHIRegDefOps);
 
+  /// Invalidate the per-OrigVReg repair session so the next repairSSAForNewDef
+  /// re-freezes OrigVReg's interval. Required when new defs (e.g. spiller
+  /// reloads) are added incrementally between repair calls for the same
+  /// OrigVReg; otherwise the cached FrozenOrigLI is stale and reaching
+  /// resolution misses the new def.
+  void resetSession() { RenameSessionOrig = Register(); }
+
   /// Check if a use is reachable from a definition using IDF analysis.
   /// 
   /// Fast paths:

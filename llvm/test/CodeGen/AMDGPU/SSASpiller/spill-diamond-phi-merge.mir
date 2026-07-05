@@ -28,19 +28,23 @@
 
 # CHECK-LABEL: name: diamond_phi_merge
 # CHECK: bb.0.entry:
-# CHECK: SI_SPILL_V32_SAVE
+# CHECK:   SI_SPILL_V32_SAVE %x,
 # CHECK: bb.1.high_rp:
-# CHECK: SI_VIRTUAL_SPILL_MARKER %x
+# CHECK:   SI_VIRTUAL_SPILL_MARKER %x
 # CHECK: bb.2.left:
-# CHECK: [[LEFT:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE
+# CHECK:   [[R2:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE
+# CHECK:   V_ADD_U32_e32 [[R2]], %p0
 # CHECK: bb.3.right:
-# CHECK: [[RIGHT:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE
+# CHECK:   [[R3:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE
+# CHECK:   V_ADD_U32_e32 [[R3]], %p1
 # CHECK: bb.4.join:
-# CHECK: [[MERGED:%[0-9]+]]:vgpr_32 = PHI [[LEFT]], %bb.2, [[RIGHT]], %bb.3
-# CHECK: V_ADD_U32_e32 [[MERGED]]
+# CHECK:   PHI %u0, %bb.2, %v0, %bb.3
+# CHECK:   [[R4:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE
+# CHECK:   V_ADD_U32_e32 [[R4]], %j0
 # CHECK: bb.5.exit:
-# CHECK: PHI %x, %bb.0, [[MERGED]], %bb.4
-# CHECK: S_ENDPGM 0
+# CHECK:   [[R5:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE
+# CHECK:   V_ADD_U32_e32 [[R5]], %e0
+# CHECK:   S_ENDPGM 0
 
 --- |
   target triple = "amdgcn-amd-amdhsa"

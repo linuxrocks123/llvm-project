@@ -108,6 +108,10 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
 
   // Current pass type for reload optimizer RP calculation
   bool IsVGPRPass = false;
+
+  // Set when a reload redef is emitted (Option 3), i.e. SSA was broken and must
+  // be reconstructed by the second RebuildSSA pass.
+  bool SSAInvalidated = false;
   
   // Reload optimizer: cached max RP per block (cleared per spill analysis)
   DenseMap<MachineBasicBlock *, unsigned> MaxRPCache;
