@@ -26,7 +26,13 @@
 #
 # amdgpu-num-vgpr=4, limit = floor(4*0.9) = 3
 # Without physreg fix: CurRP=3 (vregs only) ≤ 3, no spill
-# With physreg fix:    CurRP=3+1=4 > 3, spills %c (longest NUD)
+# With physreg fix:    CurRP=3+1=4 > 3, a vreg is spilled to relieve pressure
+#
+# NOTE: This test relies on the function remaining PHI-free. The spilled value's
+# reload dominates its single use, so no merge PHI is inserted and the NoPHIs
+# property stays set. That is what makes the allocatable physreg live-in ($vgpr0
+# on non-entry bb.1) legal here -- the MachineVerifier only rejects such live-ins
+# when PHIs are possible (!hasNoPHIs()). Do not add a construct that forces a PHI.
 #
 # CHECK-LABEL: name: physreg_pressure
 # CHECK: bb.0.entry:

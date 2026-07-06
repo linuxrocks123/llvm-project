@@ -37,8 +37,10 @@
 # CHECK:   [[R3:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE
 # CHECK:   V_ADD_U32_e32 [[R3]], %m0
 # CHECK: bb.4.exit:
-# CHECK:   [[R4:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE
-# CHECK:   V_ADD_U32_e32 [[R4]], %e0
+# bb.4 merges the original x (bb.0 bypass, never spilled) with the bb.3 reload
+# via a PHI -- no reload on the clean path.
+# CHECK:   [[PHI4:%[0-9]+]]:vgpr_32 = PHI %x, %bb.0, [[R3]], %bb.3
+# CHECK:   V_ADD_U32_e32 [[PHI4]], %e0
 # CHECK:   S_ENDPGM 0
 
 --- |

@@ -241,11 +241,6 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   /// Sort PIDF blocks by dominance order.
   void sortByDominanceOrder(SmallVectorImpl<MachineBasicBlock *> &Blocks);
 
-  /// Find closest dominating PIDF block.
-  MachineBasicBlock *findClosestDominatingPIDF(
-      MachineInstr *UseMI,
-      const SmallVectorImpl<MachineBasicBlock *> &PIdfBlocks);
-
   /// Debug helper: dumps a register set to dbgs().
   void dumpRegSet(const VRegMaskPairSet &Regs) const;
 

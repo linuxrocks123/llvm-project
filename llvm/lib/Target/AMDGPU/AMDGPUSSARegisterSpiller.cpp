@@ -1323,22 +1323,6 @@ void AMDGPUSSARegisterSpiller::sortByDominanceOrder(
   });
 }
 
-MachineBasicBlock *AMDGPUSSARegisterSpiller::findClosestDominatingPIDF(
-    MachineInstr *UseMI,
-    const SmallVectorImpl<MachineBasicBlock *> &PIdfBlocks) {
-  MachineBasicBlock *UseBB = UseMI->getParent();
-  MachineBasicBlock *Closest = nullptr;
-  
-  for (MachineBasicBlock *PIdf : PIdfBlocks) {
-    if (DT->dominates(PIdf, UseBB)) {
-      if (!Closest || DT->dominates(Closest, PIdf)) {
-        Closest = PIdf;
-      }
-    }
-  }
-  return Closest;
-}
-
 std::pair<Register, MachineInstr *>
 AMDGPUSSARegisterSpiller::getOrCreateReloadInBlock(
     MachineBasicBlock *BB, VRegMaskPair SpilledVMP, MachineInstr *InsertBefore) {
@@ -1355,9 +1339,10 @@ AMDGPUSSARegisterSpiller::getOrCreateReloadInBlock(
     }
   }
 
-  // Option 3: the reload REDEFINES OrigVReg[.sub] (a temporary SSA violation);
-  // the second RebuildSSA pass reconstructs SSA. The spiller does no SSA repair.
-  // RC is the class for the spilled lanes (narrower if partial spill).
+  // The reload REDEFINES OrigVReg[.sub] (a transient SSA violation) that the
+  // spiller repairs inline via reaching-VNI reconstruction (see
+  // emitReloadsAndRepairSSA). RC is the class for the spilled lanes (narrower
+  // if partial spill).
   const TargetRegisterClass *RC = SpilledVMP.getRegClass(MRI, TRI);
   unsigned SubRegIdx = SpilledVMP.getSubReg(MRI, TRI);
 
@@ -1420,7 +1405,7 @@ bool AMDGPUSSARegisterSpiller::insertReloadForUse(
                           << ", but must insert reload for PHI use\n");
       }
       
-      // Option 3: place the reload redef only; RebuildSSA #2 reconstructs SSA.
+      // Place the reload redef; SSA is repaired inline after all reloads.
       getOrCreateReloadInBlock(PredBB, SpilledVMP, nullptr);
       InsertedAny = true;
       LLVM_DEBUG(dbgs() << "    PHI use: reload in " << printMBBReference(*PredBB) << "\n");
@@ -1431,7 +1416,7 @@ bool AMDGPUSSARegisterSpiller::insertReloadForUse(
   // Non-PHI use: insert before use with loop adjustment
   auto Adjusted = adjustReloadForLoop(UseMI->getParent(), UseMI, KillBB, SpilledReg);
   MachineInstr *InsertBeforeUse = (Adjusted.first == UseMI->getParent()) ? UseMI : nullptr;
-  // Option 3: place the reload redef only; RebuildSSA #2 reconstructs SSA.
+  // Place the reload redef; SSA is repaired inline after all reloads.
   getOrCreateReloadInBlock(Adjusted.first, SpilledVMP, InsertBeforeUse);
   return true;
 }
@@ -1462,8 +1447,6 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(SpillInfo &Info) {
   assert(KillMI && "KillIdx must correspond to an instruction");
   MachineBasicBlock *KillBB = KillMI->getParent();
 
-  unsigned RPLimit = IsVGPRPass ? VGPRLimit : SGPRLimit;
-
   LLVM_DEBUG({
     dbgs() << "\n=== emitReloadsAndRepairSSA() [Option 3: redef-only] ===\n";
     dbgs() << "Spilled: " << printReg(SpilledReg, TRI)
@@ -1471,35 +1454,111 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(SpillInfo &Info) {
     dbgs() << "DomGroups: " << Info.DomGroups.size() << "\n";
   });
 
-  // Option 3: place reload REDEFS only; the second RebuildSSA pass reconstructs
-  // SSA (PHIs + use rewrites). Keep the reload-count optimizer (placement only)
-  // and loop adjustment; no PIDF/PHI/use-rewriting is done here.
-  SmallVector<MachineInstr *, 4> Heads;
-  for (DomGroup &G : Info.DomGroups)
-    Heads.push_back(G.getHead());
+  // Dominance-ordered reload-on-demand (see Reload_join_phi_coalescing.md).
+  // Conceptually we cut OrigVReg's live range at the kill: a use in the freed
+  // region then reaches no original value and needs a reload, while a use
+  // outside it still reaches the original. We realize the cut without surgery --
+  // reloads are redefs, so once the frontier reloads are placed the recomputed
+  // interval already merges them as isPHIDef VNInfos and keeps the original on
+  // non-kill paths; the existing reconstruction turns those into PHIs/reuses.
+  // Here we only pick the frontier: a freed-region use whose spilled lanes still
+  // reach the ORIGINAL def (not a reload and not an isPHIDef merge) gets a
+  // reload; everything else is left to reconstruction. No reload optimizer:
+  // processing dominators first makes a dominating reload visible to dominated
+  // uses (query sees it), so intra-chain sharing is automatic.
+  SmallVector<MachineInstr *, 8> Uses;
+  for (DomGroup &G : Info.DomGroups) {
+    Uses.push_back(G.getHead());
+    for (MachineInstr *U : G.getDominatedUses())
+      Uses.push_back(U);
+  }
+  llvm::sort(Uses, [this](MachineInstr *A, MachineInstr *B) {
+    if (A == B)
+      return false;
+    if (DT->dominates(A, B))
+      return true;
+    if (DT->dominates(B, A))
+      return false;
+    return LIS->getInstructionIndex(*A) < LIS->getInstructionIndex(*B);
+  });
 
-  if (!DisableReloadOptimizer && Heads.size() > 1) {
-    for (auto &RP : optimizeReloadPlacing(Heads, RPLimit, SpilledReg)) {
-      MachineBasicBlock *ReloadBB =
-          adjustReloadForLoop(RP.first, RP.second, KillBB, SpilledReg).first;
-      MachineInstr *InsertBeforeHead = nullptr;
-      for (MachineInstr *H : Heads)
-        if (H->getParent() == ReloadBB &&
-            (!InsertBeforeHead ||
-             LIS->getInstructionIndex(*H) <
-                 LIS->getInstructionIndex(*InsertBeforeHead)))
-          InsertBeforeHead = H;
-      getOrCreateReloadInBlock(ReloadBB, SpilledVMP, InsertBeforeHead);
+  const LaneBitmask SpillMask = SpilledVMP.getLaneMask();
+  const SlotIndex KillSlot = Info.KillIdx.getRegSlot();
+
+  // Decide whether use U needs a reload. Atomic-process invariant: we must NEVER
+  // prune the live LIS interval -- the RPTracker (canHoistReloadTo /
+  // adjustReloadForLoop) reads it, and removing OrigVReg's liveness there would
+  // corrupt pressure and the hoist decision. Instead we recompute the live
+  // interval (RP-safe: a reload is a redef of OrigVReg with the same one-reg
+  // footprint, and per the reload-analysis invariant OrigVReg stays counted as
+  // live), DEEP-COPY it, and CUT the COPY at the kill. On the copy the original
+  // is pruned from the kill onward (surviving only on kill-free paths) while
+  // reload values are untouched; the live LIS the RPTracker reads is intact.
+  auto needsReload = [&](MachineInstr *U) -> bool {
+    if (LIS->hasInterval(SpilledReg))
+      LIS->removeInterval(SpilledReg);
+    LiveInterval &Live = LIS->createAndComputeVirtRegInterval(SpilledReg);
+
+    // Deep copy (allocator declared first so the copy destructs before it).
+    VNInfo::Allocator CutAlloc;
+    LiveInterval Cut(SpilledReg, 0.0f);
+    Cut.assign(Live, CutAlloc);
+    for (const LiveInterval::SubRange &S : Live.subranges())
+      Cut.createSubRangeFrom(CutAlloc, S.LaneMask, S);
+
+    // Cut the COPY at the kill (never the live interval).
+    SmallVector<SlotIndex, 8> Ends;
+    if (Cut.hasSubRanges()) {
+      for (LiveInterval::SubRange &S : Cut.subranges())
+        if ((S.LaneMask & SpillMask).any() && S.getVNInfoAt(KillSlot))
+          LIS->pruneValue(S, KillSlot, &Ends);
+    } else if (Cut.getVNInfoAt(KillSlot)) {
+      LIS->pruneValue(static_cast<LiveRange &>(Cut), KillSlot, &Ends);
     }
-  } else {
-    for (MachineInstr *Head : Heads)
-      if (usesSpilledVMP(Head, SpilledVMP))
-        insertReloadForUse(Head, SpilledVMP, KillBB);
+
+    // Per-edge availability on the cut copy: reload iff some spilled lane is not
+    // available on every incoming path. No value reaches the use, or the reaching
+    // value is live-in but a predecessor edge carries no value (a freed edge) ->
+    // reload. A value defined in U's own block (a local reload) dominates U and
+    // covers it. A live-in value on ALL predecessors is a genuine merge ->
+    // reconstruction inserts a PHI, no reload here.
+    MachineBasicBlock *B = U->getParent();
+    SlotIndex UIdx = LIS->getInstructionIndex(*U).getRegSlot();
+    auto laneNeedsReload = [&](LiveRange &LR) -> bool {
+      VNInfo *AtUse = LR.getVNInfoBefore(UIdx);
+      if (!AtUse)
+        return true;
+      if (MachineInstr *DMI = LIS->getInstructionFromIndex(AtUse->def))
+        if (DMI->getParent() == B)
+          return false;
+      for (MachineBasicBlock *P : B->predecessors())
+        if (!LR.getVNInfoBefore(LIS->getMBBEndIdx(P)))
+          return true;
+      return false;
+    };
+    if (Cut.hasSubRanges()) {
+      for (LiveInterval::SubRange &S : Cut.subranges())
+        if ((S.LaneMask & SpillMask).any() && laneNeedsReload(S))
+          return true;
+      return false;
+    }
+    return laneNeedsReload(Cut);
+  };
+
+  // Dominators-first: a reload placed for a dominator/sibling is visible to
+  // later uses, so intra-chain sharing and join PHIs fall out with no reload
+  // optimizer.
+  for (MachineInstr *U : Uses) {
+    if (!usesSpilledVMP(U, SpilledVMP))
+      continue;
+    if (needsReload(U))
+      insertReloadForUse(U, SpilledVMP, KillBB);
   }
 
-  // Recompute OrigVReg's interval so it is multi-VN (original def + reload
-  // redefs) with value merges recorded as PHI-def VNInfos -- exactly what the
-  // reaching oracle reads to place PHIs.
+  // Final recompute (reflects all reloads) for the reconstruction. Correct
+  // placement above put a reload on every freed edge that needs one, so the
+  // reload redefs kill the original throughout the freed region -- the recompute's
+  // merges are then genuine (original only on kill-free paths).
   if (LIS->hasInterval(SpilledReg))
     LIS->removeInterval(SpilledReg);
   LIS->createAndComputeVirtRegInterval(SpilledReg);
@@ -1518,9 +1577,12 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(SpillInfo &Info) {
   // frozen interval per OrigVReg across our incremental spills, which would make
   // reaching resolution miss these redefs (leaving dead reloads).
   SSAUpdater->resetSession();
+  bool InsertedPHI = false;
   for (MachineInstr *RMI : ReloadDefs) {
     SmallVector<MachineOperand *> PHIDefs;
     SSAUpdater->repairSSAForNewDef(*RMI, SpilledReg, PHIDefs);
+    if (!PHIDefs.empty())
+      InsertedPHI = true;
     // Track the reloaded value -- now a renamed fresh vreg -- so the forward
     // walk does not immediately re-spill it. (Tracking OrigVReg would corrupt
     // its active-lane accounting; see getOrCreateReloadInBlock.)
@@ -1531,6 +1593,13 @@ void AMDGPUSSARegisterSpiller::emitReloadsAndRepairSSA(SpillInfo &Info) {
   }
   // SSA is restored inline; do not clear the IsSSA property at pass end.
   SSAInvalidated = false;
+
+  // Only clear NoPHIs if reconstruction actually inserted a merge PHI. Clearing
+  // it otherwise wrongly enables verifier checks (e.g. the physreg-live-in check)
+  // that assume the function may contain PHIs. (Cf. X86CmovConversion.)
+  if (InsertedPHI)
+    KillBB->getParent()->getProperties().reset(
+        MachineFunctionProperties::Property::NoPHIs);
 
   LLVM_DEBUG(dbgs() << "\nemitReloadsAndRepairSSA() complete\n");
 }
@@ -2152,10 +2221,11 @@ bool AMDGPUSSARegisterSpiller::runOnMachineFunction(MachineFunction &MF) {
     LIS->print(dbgs());
   });
 
-  // Reloads redefine OrigVReg (Option 3), breaking SSA. Clear IsSSA only when a
-  // reload was actually emitted; RebuildSSA #2 then reconstructs SSA. If no
-  // reload happened the function is still SSA and the property stays set, so
-  // RebuildSSA #2 correctly early-outs.
+  // Reloads redefine OrigVReg, breaking SSA transiently; inline reconstruction
+  // (emitReloadsAndRepairSSA) restores it and clears SSAInvalidated, so this
+  // normally does not fire. Kept as a defensive net: if any reload path ever
+  // left SSA unrepaired, clearing IsSSA makes the (SSA-requiring) allocator
+  // fail loudly rather than silently consuming non-SSA MIR.
   if (SSAInvalidated)
     MF.getProperties().reset(MachineFunctionProperties::Property::IsSSA);
 

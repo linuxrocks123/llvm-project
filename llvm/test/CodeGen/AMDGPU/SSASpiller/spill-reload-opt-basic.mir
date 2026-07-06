@@ -41,11 +41,11 @@ machineFunctionInfo:
 body:             |
   ; CHECK-LABEL: name: reload_opt_basic
   
-  ; Reload optimizer places ONE reload at NCD (entry block) serving both uses
+  ; Redesign: reloads are placed on demand at each freed use, NOT hoisted back
+  ; into the entry block's high-pressure region. Each branch reloads its own copy.
   ; CHECK: bb.0.entry:
   ; CHECK: SI_SPILL_V32_SAVE
   ; CHECK: SI_VIRTUAL_SPILL_MARKER %x
-  ; CHECK: [[RELOAD:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE
   
   bb.0.entry:
     successors: %bb.1(0x40000000), %bb.2(0x40000000)
@@ -72,18 +72,18 @@ body:             |
   bb.1.left:
     successors: %bb.3(0x80000000)
     
-    ; Use %x - uses reloaded value from entry block
     ; CHECK: bb.1.left:
-    ; CHECK: V_ADD_U32_e32 [[RELOAD]]
+    ; CHECK: [[R1:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE
+    ; CHECK: V_ADD_U32_e32 [[R1]]
     %left_result:vgpr_32 = V_ADD_U32_e32 %x, %sum3, implicit $exec
     S_BRANCH %bb.3
 
   bb.2.right:
     successors: %bb.3(0x80000000)
     
-    ; Use %x - uses same reloaded value from entry block
     ; CHECK: bb.2.right:
-    ; CHECK: V_ADD_U32_e32 [[RELOAD]]
+    ; CHECK: [[R2:%[0-9]+]]:vgpr_32 = SI_SPILL_V32_RESTORE
+    ; CHECK: V_ADD_U32_e32 [[R2]]
     %right_result:vgpr_32 = V_ADD_U32_e32 %x, %sum3, implicit $exec
     S_BRANCH %bb.3
 
