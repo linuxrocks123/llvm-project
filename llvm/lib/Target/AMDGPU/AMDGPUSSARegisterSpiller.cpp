@@ -1273,8 +1273,7 @@ void AMDGPUSSARegisterSpiller::buildDomGroupsForSpill(SpillInfo &Info) {
     
     // Only consider uses reachable from KillMI
     if (!DT->dominates(KillMI, &UseMI) &&
-        !SSAUpdater->isUseReachableFromDef(KillMI, &UseMI, SpilledReg,
-                                            Info.SpilledVMP.getLaneMask()))
+        !SSAUpdater->isUseReachableFromDef(KillMI, &UseMI, SpilledReg))
       continue;
     
     AllUses.push_back(&UseMI);

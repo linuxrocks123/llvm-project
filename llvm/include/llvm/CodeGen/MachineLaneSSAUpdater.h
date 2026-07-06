@@ -88,49 +88,14 @@ public:
   /// resolution misses the new def.
   void resetSession() { RenameSessionOrig = Register(); }
 
-  /// Check if a use is reachable from a definition using IDF analysis.
-  /// 
-  /// Fast paths:
-  /// - Same block: check instruction order
-  /// - Non-PHI uses: check block dominance
-  /// - PHI with dominated predecessor: return true
-  ///
-  /// \param DefMI - The instruction that defines/uses the register
-  /// \param UseMI - The instruction that uses the register
-  /// \param OrigVReg - The original register being analyzed
-  /// \param DefMask - The lane mask for the definition (used for IDF analysis)
-  /// \returns true if UseMI is reachable from DefMI
-  // TODO: Make VRegMaskPair.h public and change signature to use VRegMaskPair
-  // instead of Register and LaneBitmask separately
+  /// Check whether \p UseMI (a use of \p OrigVReg) is reachable from \p DefMI
+  /// in the CFG -- i.e. whether the use lies downstream of the def (for a PHI
+  /// use, the target is the incoming predecessor block). Used by the spiller to
+  /// decide which uses a spill at \p DefMI affects. Since OrigVReg is SSA the
+  /// value is live along every def->use path, so plain CFG reachability is
+  /// exact -- no dominance-frontier needed.
   bool isUseReachableFromDef(MachineInstr *DefMI, MachineInstr *UseMI,
-                             Register OrigVReg, LaneBitmask DefMask);
-
-  /// Check if a use is reachable from a definition.
-  /// Fast path (dominated use): Simple dominance check
-  /// Slow path (PHI with non-dominated predecessor):
-  /// Uses pruned IDF to determine reachability
-  ///
-  /// \param DefOp - The definition operand (provides DefMI, block, mask)
-  /// \param UseOp - The use operand (provides UseMI)
-  /// \param OrigVReg - The original register being analyzed
-  /// \returns true if UseOp is reachable from DefOp
-  bool isUseReachableFromDef(MachineOperand &DefOp,
-                             MachineOperand &UseOp,
                              Register OrigVReg);
-
-  /// Clear the IDF cache. Call this if the CFG is modified.
-  void clearIDFCache() { IDFCache.clear(); }
-
-  // Public cache key structure for DenseMapInfo specialization
-  struct IDFCacheKey {
-    Register VReg;
-    LaneBitmask Mask;
-    unsigned DefBlockNum;
-    
-    bool operator==(const IDFCacheKey &Other) const {
-      return VReg == Other.VReg && Mask == Other.Mask && DefBlockNum == Other.DefBlockNum;
-    }
-  };
 
   /// Rewrite dominated uses of OrigVReg to NewSSA according to the
   /// exact/subset/super policy; create REG_SEQUENCE only when needed.
@@ -174,13 +139,6 @@ private:
                          const SmallVector<LaneBitmask, 4> &LaneMasks,
                          const MachineInstr &AtMI);
 
-  // Compute pruned IDF for a set of definition blocks (usually {block(NewDef)}),
-  // intersected with blocks where OrigVReg lanes specified by DefMask are live-in.
-  void computePrunedIDF(Register OrigVReg,
-                        LaneBitmask DefMask,
-                        ArrayRef<MachineBasicBlock *> NewDefBlocks,
-                        SmallVectorImpl<MachineBasicBlock *> &OutIDFBlocks);
-
   // Insert lane-aware Machine PHIs at the join points recorded as PHI-def
   // VNInfos in OrigVReg's frozen interval (per lane, the pruned IDF that
   // LiveIntervalCalc already computed). Returns each PHI result operand paired
@@ -195,9 +153,6 @@ private:
   // placeholder). Dedups via LanePHIs. Returns the PHI result operand.
   MachineOperand *createPHIInBlockReaching(MachineBasicBlock &JoinMBB,
                                            Register OrigVReg, LaneBitmask Lane);
-
-  // Cache for IDF computations to avoid redundant calculations
-  DenseMap<IDFCacheKey, SmallVector<MachineBasicBlock *, 4>> IDFCache;
 
   // Per-OrigVReg repair session key: reset when repairSSAForNewDef is first
   // called for a different OrigVReg (the driver processes all defs of an
@@ -257,8 +212,6 @@ private:
   const RenamedDef *renamedForReachingVNI(const VNInfo *V);
 
   // Internal helper methods for use rewriting
-  bool defDominatesUse(MachineInstr *DefMI, MachineInstr *UseMI, MachineOperand &UseOp);
-  bool defReachesUse(MachineInstr *DefMI, Register NewSSA, MachineInstr *UseMI, MachineOperand &UseOp);
   LaneBitmask operandLaneMask(const MachineOperand &MO);
   Register buildRSForSuperUse(MachineInstr *UseMI, MachineOperand &MO,
                              Register OldVR, Register NewVR, LaneBitmask MaskToRewrite,
@@ -324,28 +277,6 @@ struct DenseMapInfo<LaneBitmask> {
   }
   
   static bool isEqual(const LaneBitmask &LHS, const LaneBitmask &RHS) {
-    return LHS == RHS;
-  }
-};
-
-// DenseMapInfo specialization for MachineLaneSSAUpdater::IDFCacheKey
-template <>
-struct DenseMapInfo<MachineLaneSSAUpdater::IDFCacheKey> {
-  using Key = MachineLaneSSAUpdater::IDFCacheKey;
-  
-  static inline Key getEmptyKey() {
-    return Key{Register(), LaneBitmask::getAll(), ~0U};
-  }
-  
-  static inline Key getTombstoneKey() {
-    return Key{Register(), LaneBitmask::getNone(), ~0U - 1};
-  }
-  
-  static unsigned getHashValue(const Key &K) {
-    return hash_combine(K.VReg.id(), K.Mask.getAsInteger(), K.DefBlockNum);
-  }
-  
-  static bool isEqual(const Key &LHS, const Key &RHS) {
     return LHS == RHS;
   }
 };
