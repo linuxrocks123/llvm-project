@@ -25,6 +25,7 @@
 #include "SIMachineFunctionInfo.h"
 #include "SIRegisterInfo.h"
 #include "VRegMaskPair.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -33,7 +34,6 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Register.h"
 #include "llvm/CodeGen/SlotIndexes.h"
-#include "llvm/ADT/DenseMap.h"
 
 namespace llvm {
 
@@ -45,17 +45,19 @@ class DomGroup {
 
 public:
   DomGroup(MachineInstr *MI) : Head(MI) {}
-  
+
   MachineInstr *getHead() const { return Head; }
-  const SmallVector<MachineInstr *, 4> &getDominatedUses() const { return DominatedUses; }
-  
+  const SmallVector<MachineInstr *, 4> &getDominatedUses() const {
+    return DominatedUses;
+  }
+
   void addDominatedUse(MachineInstr *MI) { DominatedUses.push_back(MI); }
-  
+
   void promoteHead(MachineInstr *NewHead) {
     DominatedUses.push_back(Head);
     Head = NewHead;
   }
-  
+
   size_t size() const { return 1 + DominatedUses.size(); }
 };
 
@@ -78,8 +80,7 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   SlotIndexes *Indexes = nullptr;
   MachineDominatorTree *DT = nullptr;
 
-  // SSA updater for IDF-based reachability and SSA repair
-  // FIXME: Add cache invalidation when CFG changes
+  // SSA updater: reaching-VNI SSA repair and CFG-reachability queries.
   std::unique_ptr<MachineLaneSSAUpdater> SSAUpdater;
 
   // Register pressure tracker (reused throughout the pass)
@@ -92,13 +93,10 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   DenseMap<VRegMaskPair, int> Virt2StackSlotMap;
 
   // Track registers that have been stored at definition (to avoid EXEC drift)
-  // When a register is selected for spilling, we store it right after definition
-  // (when EXEC is full), then mark it dead at the "real spill" point using pruneValue()
+  // When a register is selected for spilling, we store it right after
+  // definition (when EXEC is full), then mark it dead at the "real spill" point
+  // using pruneValue()
   DenseMap<VRegMaskPair, MachineInstr *> StoredAtDefinition;
-
-  // Divergent path handling: Maps spill instruction to reload instruction
-  // for reachable but not dominated uses (divergent paths)
-  DenseMap<MachineInstr *, SmallVector<MachineInstr *, 2>> SpillToReloadMap;
 
   VRegMaskPairSet ReloadedRegs;
 
@@ -106,13 +104,13 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   unsigned VGPRLimit = 0;
   unsigned SGPRLimit = 0;
 
-  // Current pass type for reload optimizer RP calculation
+  // Current pass type for RP calculation.
   bool IsVGPRPass = false;
 
-  // Set when a reload redef is emitted (Option 3), i.e. SSA was broken and must
-  // be reconstructed by the second RebuildSSA pass.
+  // Set transiently when a reload redef breaks SSA; inline reconstruction
+  // restores it before the pass returns (see emitReloadsAndRepairSSA).
   bool SSAInvalidated = false;
-  
+
   // Reload optimizer: cached max RP per block (cleared per spill analysis)
   DenseMap<MachineBasicBlock *, unsigned> MaxRPCache;
 
@@ -134,13 +132,6 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   /// Creates a spill slot for the given register class.
   int createSpillSlot(const TargetRegisterClass *RC);
 
-  /// Calculates the total size of a register set in 32-bit register units.
-  /// This accounts for AMDGPU's 32-bit physical register granularity:
-  /// - VGPR_32: size 1
-  /// - VReg_64: size 2
-  /// - VReg_128: size 4, etc.
-  unsigned getRegSetSizeInRegs(const VRegMaskPairSet &VRegs) const;
-
   /// Converts RPTracker's LiveRegSet to VRegMaskPairSet.
   VRegMaskPairSet
   convertLiveRegs(const GCNRPTracker::LiveRegSet &LiveRegs) const;
@@ -150,10 +141,11 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   /// Uses IsVGPRPass class member (set before calling).
   bool processFunction(MachineFunction &MF, unsigned RPLimit);
 
-  /// Validates that final register pressure is within limits after all spilling.
-  /// This is a temporary validation check until we properly handle clean path reloads.
+  /// Validates that final register pressure is within limits after all
+  /// spilling. This is a temporary validation check until we properly handle
+  /// clean path reloads.
   void validateFinalRegisterPressure(MachineFunction &MF, unsigned RPLimit,
-                                      bool IsVGPR);
+                                     bool IsVGPR);
 
   /// Sorts the register set by next-use distance (descending).
   /// Registers with longer next-use distances are moved to the back.
@@ -197,18 +189,16 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
                       VRegMaskPairSet &Active, unsigned CurRP,
                       unsigned RPLimit);
 
-  /// Stores register to stack slot right after its definition (when EXEC is full).
-  /// This avoids EXEC drift issues by ensuring all lanes are stored before any
-  /// divergent control flow can modify EXEC. Returns the store instruction.
+  /// Stores register to stack slot right after its definition (when EXEC is
+  /// full). This avoids EXEC drift issues by ensuring all lanes are stored
+  /// before any divergent control flow can modify EXEC. Returns the store
+  /// instruction.
   MachineInstr *spillAtDefinition(VRegMaskPair VMP);
 
-  /// If the register was already stored at definition, uses pruneValue() to mark
-  /// it dead at this point instead of emitting a new store.
+  /// If the register was already stored at definition, uses pruneValue() to
+  /// mark it dead at this point instead of emitting a new store.
   void spillBefore(MachineBasicBlock &MBB,
                    MachineBasicBlock::iterator InsertBefore, VRegMaskPair VMP);
-
-  /// Emits a spill instruction at the end of a basic block (before terminator).
-  void spillAtEnd(MachineBasicBlock &MBB, VRegMaskPair VMP);
 
   /// Emits a spill instruction before the given position (reverse iterator).
   /// This is used during backward traversal in processFunction().
@@ -233,13 +223,10 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   getOrCreateReloadInBlock(MachineBasicBlock *BB, VRegMaskPair SpilledVMP,
                            MachineInstr *InsertBefore = nullptr);
 
-  /// Insert reload for a use instruction. For PHI uses, inserts in predecessor blocks.
-  /// For non-PHI uses, handles loop adjustment.
+  /// Insert reload for a use instruction. For PHI uses, inserts in predecessor
+  /// blocks. For non-PHI uses, handles loop adjustment.
   bool insertReloadForUse(MachineInstr *UseMI, VRegMaskPair SpilledVMP,
                           MachineBasicBlock *KillBB);
-
-  /// Sort PIDF blocks by dominance order.
-  void sortByDominanceOrder(SmallVectorImpl<MachineBasicBlock *> &Blocks);
 
   /// Debug helper: dumps a register set to dbgs().
   void dumpRegSet(const VRegMaskPairSet &Regs) const;
@@ -247,83 +234,48 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   // ============================================================================
   // Divergent Path Optimization Helpers
   // ============================================================================
-  
+
   /// Walk BFS from \p StartBB through blocks where \p SpilledReg is live.
   /// For each block, finds first use of SpilledReg (if any) and calls IsBad.
-  /// \param stopOnBad If true (default), return immediately when IsBad returns true.
+  /// \param StopOnBad If true (default), return immediately when IsBad returns
+  /// true.
   ///                  If false, continue walking all paths.
   /// \returns true if all paths OK, false if any bad found.
-  bool walkPathsToUses(MachineBasicBlock *StartBB,
-                       Register SpilledReg,
-                       llvm::function_ref<bool(MachineBasicBlock *,
-                                               MachineInstr *)> IsBad,
-                       bool stopOnBad = true) const;
-  
-  /// Checks if the given block has any use of SpilledVMP.
-  /// If StopInstr is provided and is in this block, only checks up to that instruction.
-  /// Uses NextUseAnalysis for fast full-block checks, falls back to instruction scan
-  /// for partial blocks.
-  bool blockHasUse(MachineBasicBlock *BB, VRegMaskPair SpilledVMP,
-                   MachineInstr *StopInstr) const;
-  
+  bool walkPathsToUses(
+      MachineBasicBlock *StartBB, Register SpilledReg,
+      llvm::function_ref<bool(MachineBasicBlock *, MachineInstr *)> IsBad,
+      bool StopOnBad = true) const;
+
   /// Check if the given instruction still uses the spilled register with
-  /// overlapping lane mask. Returns false if the use was rewritten by SSA repair.
+  /// overlapping lane mask. Returns false if the use was rewritten by SSA
+  /// repair.
   bool usesSpilledVMP(const MachineInstr *MI, VRegMaskPair SpilledVMP) const;
-  
-  /// Attempts to hoist spill to NCD if no unexpected uses exist on paths.
-  /// Returns NCD if hoisting succeeded (and moves virtual spill marker), nullptr otherwise.
-  MachineBasicBlock *tryHoistSpillToNCD(MachineInstr *KillMI, VRegMaskPair SpilledVMP,
-                                         const SmallVectorImpl<MachineInstr *> &ReachableUses);
-
-  /// Collects all dominated blocks of the given spill block.
-  void collectDominatedBlocks(MachineBasicBlock &SpillMBB,
-                              SmallVectorImpl<MachineBasicBlock *> &DomBBs) const;
-
-  void cutFromLiveRange(LiveRange &LR, SlotIndex CutStart, SlotIndex CutEnd);
 
   // ============================================================================
   // Reload Optimizer
   // ============================================================================
-  
+
   /// Computes and caches maximum register pressure within a basic block.
   unsigned getMaxRPForBlock(MachineBasicBlock *MBB);
-  
+
   /// Computes max RP in block walking down from StopMI to block start.
   unsigned getMaxRPInBlockDownTo(MachineBasicBlock *MBB, MachineInstr *StopMI);
-  
+
   /// Checks if reload can be hoisted to NCD by walking paths and checking RP.
-  /// InsertPoint is the reload insertion point in NCD (nullptr if no use in NCD).
+  /// InsertPoint is the reload insertion point in NCD (nullptr if no use in
+  /// NCD).
   bool canHoistReloadTo(MachineBasicBlock *NCD, MachineInstr *InsertPoint,
                         unsigned RPLimit, Register SpilledReg);
-  
-  /// Optimize reload placement for multiple dom-group heads.
-  /// Uses iterative greedy clique-based NCD algorithm with RP checking.
-  /// Returns list of (ReloadBB, InsertBeforeMI) pairs.
-  SmallVector<std::pair<MachineBasicBlock *, MachineInstr *>, 4>
-  optimizeReloadPlacing(const SmallVectorImpl<MachineInstr *> &GroupHeads,
-                        unsigned RPLimit, Register SpilledReg);
-  
+
   // ============================================================================
   // Loop-Aware Spilling Helpers
   // ============================================================================
-  
-  /// Returns true if VMP's definition is inside any loop.
-  bool hasDefInLoop(VRegMaskPair VMP) const;
-  
-  /// Returns true if VMP has any use inside a loop.
-  bool hasUseInLoop(VRegMaskPair VMP) const;
-  
-  /// Find the loop exit block that dominates SpillBB.
-  /// For loops with multiple exits, returns the one dominating SpillBB.
-  /// Returns nullptr if no suitable exit exists.
-  MachineBasicBlock *getLoopExitDominatingSpill(MachineLoop *Loop,
-                                                 MachineBasicBlock *SpillBB) const;
-  
+
   /// Get the effective kill block after hoisting out of all enclosing loops.
   /// If SpillBB is inside loop(s), returns the outermost loop's preheader.
   /// Otherwise returns SpillBB unchanged.
   MachineBasicBlock *getEffectiveKillBB(MachineBasicBlock *SpillBB) const;
-  
+
   /// Adjust reload placement for loop-aware spilling.
   /// If ReloadBB is in a loop but KillBB is outside, returns the preheader
   /// (only if it doesn't cause RP to exceed limit on the path).

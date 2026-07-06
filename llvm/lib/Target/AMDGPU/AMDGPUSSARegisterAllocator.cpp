@@ -95,7 +95,10 @@ MCRegister AMDGPUSSARegisterAllocator::pickFreePhysReg(
   for (MCRegister PR : RegClassInfo.getOrder(RC)) {
     bool Free = true;
     for (MCRegUnit Unit : TRI->regunits(PR))
-      if (OccupiedAtDef.test(Unit)) { Free = false; break; }
+      if (OccupiedAtDef.test(Unit)) {
+        Free = false;
+        break;
+      }
     if (Free)
       return PR;
   }
@@ -111,8 +114,8 @@ void AMDGPUSSARegisterAllocator::seedOccupiedAtBBEntry(MachineBasicBlock *MBB) {
   for (const auto &[VReg, PhysReg] : ColorMap) {
     if (LIS->getInterval(VReg).liveAt(BBStart)) {
       markOccupied(PhysReg);
-      LLVM_DEBUG(dbgs() << "    live-in: " << printReg(VReg, TRI)
-                        << " -> " << TRI->getName(PhysReg) << "\n");
+      LLVM_DEBUG(dbgs() << "    live-in: " << printReg(VReg, TRI) << " -> "
+                        << TRI->getName(PhysReg) << "\n");
     }
   }
 
@@ -142,11 +145,13 @@ bool AMDGPUSSARegisterAllocator::edgeCopiesNeedSplit(
     return false;
   };
 
-  // A permutation cycle among the copies does NOT force a split. resolvePermutation
-  // breaks a cycle either with a scratch register or with V_SWAP_B32/XOR:
-  //   - the scratch is allocated above the high-water mark (VGPR0 + MaxVGPRIdx /
-  //     SGPR0 + MaxSGPRIdx), so it is free on every out-edge by construction and
-  //     cannot clobber a sibling successor;
+  // A permutation cycle among the copies does NOT force a split.
+  // resolvePermutation breaks a cycle either with a scratch register or with
+  // V_SWAP_B32/XOR:
+  //   - the scratch is allocated above the high-water mark (VGPR0 + MaxVGPRIdx
+  //   /
+  //     SGPR0 + MaxSGPRIdx), so it is free on every out-edge by construction
+  //     and cannot clobber a sibling successor;
   //   - V_SWAP_B32/XOR only touch the cycle's own registers, i.e. the copy
   //     destinations, which the destination-clobber check below already covers.
   // (This relies on resolvePermutation picking the scratch above the high-water
@@ -216,8 +221,7 @@ void AMDGPUSSARegisterAllocator::color() {
             Register Reg = MO.getReg();
             if (TRI->getRegSizeInBits(*MRI->getRegClass(Reg)) > Width)
               if (auto It = ColorMap.find(Reg); It != ColorMap.end())
-                WiderDefs.push_back(
-                    {It->second, &LIS->getInterval(Reg)});
+                WiderDefs.push_back({It->second, &LIS->getInterval(Reg)});
           }
 
       seedOccupiedAtBBEntry(MBB);
@@ -229,7 +233,8 @@ void AMDGPUSSARegisterAllocator::color() {
         // predecessor boundaries, and markFree would clear physregs that
         // preceding PHI defs already claimed.
         if (!MI.isPHI()) {
-          SlotIndex NextSI = LIS->getInstructionIndex(MI).getRegSlot().getNextSlot();
+          SlotIndex NextSI =
+              LIS->getInstructionIndex(MI).getRegSlot().getNextSlot();
           for (const MachineOperand &MO : MI.uses()) {
             if (!MO.isReg())
               continue;
@@ -245,8 +250,9 @@ void AMDGPUSSARegisterAllocator::color() {
               continue;
             if (!LIS->getInterval(Reg).liveAt(NextSI)) {
               markFree(It->second);
-              LLVM_DEBUG(dbgs() << "    kill: " << printReg(Reg, TRI)
-                                << " free " << TRI->getName(It->second) << "\n");
+              LLVM_DEBUG(dbgs()
+                         << "    kill: " << printReg(Reg, TRI) << " free "
+                         << TRI->getName(It->second) << "\n");
             }
           }
         }
@@ -261,9 +267,8 @@ void AMDGPUSSARegisterAllocator::color() {
           if (TRI->getRegSizeInBits(*MRI->getRegClass(Reg)) != Width) {
             if (auto It = ColorMap.find(Reg); It != ColorMap.end()) {
               markOccupied(It->second);
-              LLVM_DEBUG(dbgs() << "    mark wider def: "
-                                << printReg(Reg, TRI) << " -> "
-                                << TRI->getName(It->second) << "\n");
+              LLVM_DEBUG(dbgs() << "    mark wider def: " << printReg(Reg, TRI)
+                                << " -> " << TRI->getName(It->second) << "\n");
             }
             continue;
           }
@@ -279,8 +284,8 @@ void AMDGPUSSARegisterAllocator::color() {
             Chosen = pickFreePhysReg(MRI->getRegClass(Reg),
                                      LIS->getInterval(Reg), WiderDefs);
             assert(Chosen && "Failed to find free physreg");
-            LLVM_DEBUG(dbgs() << "    color: " << printReg(Reg, TRI)
-                              << " -> " << TRI->getName(Chosen) << "\n");
+            LLVM_DEBUG(dbgs() << "    color: " << printReg(Reg, TRI) << " -> "
+                              << TRI->getName(Chosen) << "\n");
           }
 
           ColorMap[Reg] = Chosen;
@@ -301,8 +306,8 @@ void AMDGPUSSARegisterAllocator::color() {
   LLVM_DEBUG({
     dbgs() << "\nColoring result:\n";
     for (const auto &[VReg, PhysReg] : ColorMap)
-      dbgs() << "  " << printReg(VReg, TRI) << " -> "
-             << TRI->getName(PhysReg) << "\n";
+      dbgs() << "  " << printReg(VReg, TRI) << " -> " << TRI->getName(PhysReg)
+             << "\n";
   });
 }
 
@@ -324,17 +329,23 @@ bool AMDGPUSSARegisterAllocator::hasCFPseudos(MachineFunction &MF) const {
   return false;
 }
 
-void AMDGPUSSARegisterAllocator::emitSwap(
-    MachineBasicBlock &MBB, MachineBasicBlock::iterator InsertPt,
-    MCRegister RegA, MCRegister RegB) {
+void AMDGPUSSARegisterAllocator::emitSwap(MachineBasicBlock &MBB,
+                                          MachineBasicBlock::iterator InsertPt,
+                                          MCRegister RegA, MCRegister RegB) {
   const TargetRegisterClass *RC = TRI->getPhysRegBaseClass(RegA);
   unsigned RegWidth = TRI->getRegSizeInBits(*RC);
 
   // In-place XOR swap: A ^= B; B ^= A; A ^= B.
   auto EmitXorTriplet = [&](unsigned Opc) {
-    BuildMI(MBB, InsertPt, DebugLoc(), TII->get(Opc), RegA).addReg(RegA).addReg(RegB);
-    BuildMI(MBB, InsertPt, DebugLoc(), TII->get(Opc), RegB).addReg(RegA).addReg(RegB);
-    BuildMI(MBB, InsertPt, DebugLoc(), TII->get(Opc), RegA).addReg(RegA).addReg(RegB);
+    BuildMI(MBB, InsertPt, DebugLoc(), TII->get(Opc), RegA)
+        .addReg(RegA)
+        .addReg(RegB);
+    BuildMI(MBB, InsertPt, DebugLoc(), TII->get(Opc), RegB)
+        .addReg(RegA)
+        .addReg(RegB);
+    BuildMI(MBB, InsertPt, DebugLoc(), TII->get(Opc), RegA)
+        .addReg(RegA)
+        .addReg(RegB);
   };
 
   auto SwapInChunks = [&](unsigned ElemBytes) {
@@ -346,7 +357,8 @@ void AMDGPUSSARegisterAllocator::emitSwap(
   if (!TRI->isVGPRClass(RC)) {
     // SGPR: no scalar swap instruction; use an S_XOR triplet with the widest
     // available scalar XOR (B64 for 64-bit chunks, B32 otherwise). S_XOR writes
-    // SCC, so resolvePermutation only routes an SGPR cycle here when SCC is dead.
+    // SCC, so resolvePermutation only routes an SGPR cycle here when SCC is
+    // dead.
     if (RegWidth == 32) {
       EmitXorTriplet(AMDGPU::S_XOR_B32);
     } else if (RegWidth == 64) {
@@ -440,14 +452,16 @@ void AMDGPUSSARegisterAllocator::resolvePermutation(
     // Scratch must match the cycle's register width.
     unsigned CycleWidth =
         TRI->getRegSizeInBits(*TRI->getPhysRegBaseClass(CycleStart)) / 32;
-    unsigned ScratchOcc = IsVGPR
-        ? ST->getOccupancyWithNumVGPRs(MaxIdx + CycleWidth, DynVGPRBlockSize)
-        : ST->getOccupancyWithNumSGPRs(MaxIdx + CycleWidth);
+    unsigned ScratchOcc =
+        IsVGPR ? ST->getOccupancyWithNumVGPRs(MaxIdx + CycleWidth,
+                                              DynVGPRBlockSize)
+               : ST->getOccupancyWithNumSGPRs(MaxIdx + CycleWidth);
     bool ScratchFits = MaxIdx + CycleWidth <= MaxHWLimit;
 
     // Decide between resolving the cycle with a scratch register (plain COPYs)
     // and in place via emitSwap.
-    //   VGPR: emitSwap (V_SWAP_B32 or a V_XOR triplet) is scratch- and SCC-free,
+    //   VGPR: emitSwap (V_SWAP_B32 or a V_XOR triplet) is scratch- and
+    //   SCC-free,
     //         so prefer it; use a scratch only when swap is unavailable and it
     //         costs no occupancy.
     //   SGPR: there is no scalar swap. emitSwap uses an S_XOR triplet, which
@@ -460,29 +474,30 @@ void AMDGPUSSARegisterAllocator::resolvePermutation(
       bool SccDead = MBB.computeRegisterLiveness(TRI, AMDGPU::SCC, InsertPt) ==
                      MachineBasicBlock::LQR_Dead;
       UseScratch = !SccDead;
-      assert((!UseScratch || ScratchFits) &&
-             "SGPR permutation cycle with live SCC and no free scratch register");
+      assert(
+          (!UseScratch || ScratchFits) &&
+          "SGPR permutation cycle with live SCC and no free scratch register");
     }
 
     if (UseScratch && ScratchFits) {
-      MCRegister ScratchBase = IsVGPR
-          ? MCRegister(AMDGPU::VGPR0 + MaxIdx)
-          : MCRegister(AMDGPU::SGPR0 + MaxIdx);
-      MCRegister Scratch = (CycleWidth == 1)
-          ? ScratchBase
-          : TRI->getMatchingSuperReg(ScratchBase, AMDGPU::sub0,
-                TRI->getPhysRegBaseClass(CycleStart));
+      MCRegister ScratchBase = IsVGPR ? MCRegister(AMDGPU::VGPR0 + MaxIdx)
+                                      : MCRegister(AMDGPU::SGPR0 + MaxIdx);
+      MCRegister Scratch =
+          (CycleWidth == 1)
+              ? ScratchBase
+              : TRI->getMatchingSuperReg(ScratchBase, AMDGPU::sub0,
+                                         TRI->getPhysRegBaseClass(CycleStart));
       MaxIdx += CycleWidth;
 
-      LLVM_DEBUG(dbgs() << "    cycle via scratch "
-                        << TRI->getName(Scratch) << ":\n");
+      LLVM_DEBUG(dbgs() << "    cycle via scratch " << TRI->getName(Scratch)
+                        << ":\n");
 
       // Save CycleStart — it will be overwritten by the first copy.
       // The last register in the walk receives this saved value.
       BuildMI(MBB, InsertPt, DebugLoc(), TII->get(TargetOpcode::COPY), Scratch)
           .addReg(CycleStart);
-      LLVM_DEBUG(dbgs() << "      save: " << TRI->getName(CycleStart)
-                        << " -> " << TRI->getName(Scratch) << "\n");
+      LLVM_DEBUG(dbgs() << "      save: " << TRI->getName(CycleStart) << " -> "
+                        << TRI->getName(Scratch) << "\n");
 
       MCRegister Cur = CycleStart;
       while (true) {
@@ -508,12 +523,12 @@ void AMDGPUSSARegisterAllocator::resolvePermutation(
     // Tier 2/3: break cycle pairwise, in place. emitSwap picks the right op per
     // register file: VGPR -> V_SWAP_B32 (GFX9+) or a V_XOR triplet; SGPR -> an
     // S_XOR triplet (only reached when SCC is dead, per the UseScratch decision
-    // above, since S_XOR writes SCC). Collect the full cycle, then emit n-1 swaps
-    // from tail to head.
-    LLVM_DEBUG(dbgs() << "    cycle via "
-                      << (!IsVGPR ? "S_XOR"
-                                  : (ST->hasSwap() ? "V_SWAP_B32" : "V_XOR"))
-                      << ":\n");
+    // above, since S_XOR writes SCC). Collect the full cycle, then emit n-1
+    // swaps from tail to head.
+    LLVM_DEBUG(
+        dbgs() << "    cycle via "
+               << (!IsVGPR ? "S_XOR" : (ST->hasSwap() ? "V_SWAP_B32" : "V_XOR"))
+               << ":\n");
     SmallVector<MCRegister> Cycle;
     MCRegister Cur = CycleStart;
     while (DstToSrc.count(Cur)) {
@@ -648,8 +663,8 @@ void AMDGPUSSARegisterAllocator::addPhysRegLiveIns(MachineFunction &MF) {
 // SSA destruction and physical register assignment are complete.
 // Mirrors the state produced by VirtRegRewriter in the greedy RA path:
 //   NoPHIs     — all PHI instructions removed by lowerPHIs()
-//   NoVRegs    — all virtual registers replaced with physregs by rewriteOperands()
-//   IsSSA      — cleared by leaveSSA() (not SSA anymore)
+//   NoVRegs    — all virtual registers replaced with physregs by
+//   rewriteOperands() IsSSA      — cleared by leaveSSA() (not SSA anymore)
 // TracksLiveness is deliberately preserved: MBB live-in sets contain only
 // physregs and remain valid after the rewrite; clearing it would break
 // post-RA passes such as MachineLICM that call livein_begin().
@@ -672,9 +687,10 @@ void AMDGPUSSARegisterAllocator::finalizeProperties(MachineFunction &MF) {
 // so REG_SEQUENCEs that survived into post-RA MIR must be lowered here.
 //
 // A REG_SEQUENCE:  dst = REG_SEQUENCE src0, sub0, src1, sub1, ...
-// is "trivial" if for every (src_i, sub_i): src_i == TRI->getSubReg(dst, sub_i).
-// Trivial ones are deleted. Non-trivial ones are lowered to COPY instructions
-// placed immediately before the REG_SEQUENCE, then the REG_SEQUENCE is deleted.
+// is "trivial" if for every (src_i, sub_i): src_i == TRI->getSubReg(dst,
+// sub_i). Trivial ones are deleted. Non-trivial ones are lowered to COPY
+// instructions placed immediately before the REG_SEQUENCE, then the
+// REG_SEQUENCE is deleted.
 void AMDGPUSSARegisterAllocator::eliminateRegSequences(MachineFunction &MF) {
   for (MachineBasicBlock &MBB : MF) {
     for (MachineInstr &MI : llvm::make_early_inc_range(MBB)) {
@@ -714,7 +730,7 @@ void AMDGPUSSARegisterAllocator::eliminateRegSequences(MachineFunction &MF) {
 void AMDGPUSSARegisterAllocator::destroySSAAndRewrite(MachineFunction &MF) {
   if (hasCFPseudos(MF)) {
     LLVM_DEBUG(dbgs() << "SSA Destruction: skipped — "
-                      "SI control-flow pseudos present\n");
+                         "SI control-flow pseudos present\n");
     return;
   }
 
@@ -728,18 +744,19 @@ void AMDGPUSSARegisterAllocator::destroySSAAndRewrite(MachineFunction &MF) {
 // === Main entry point ===
 
 bool AMDGPUSSARegisterAllocator::runOnMachineFunction(MachineFunction &MF) {
-  TRI = static_cast<const SIRegisterInfo *>(MF.getSubtarget().getRegisterInfo());
+  TRI =
+      static_cast<const SIRegisterInfo *>(MF.getSubtarget().getRegisterInfo());
   TII = static_cast<const SIInstrInfo *>(MF.getSubtarget().getInstrInfo());
   MRI = &MF.getRegInfo();
   ST = &MF.getSubtarget<GCNSubtarget>();
   MDT = &getAnalysis<MachineDominatorTreeWrapperPass>().getDomTree();
   LIS = &getAnalysis<LiveIntervalsWrapperPass>().getLIS();
   RegClassInfo.runOnMachineFunction(MF);
-  DynVGPRBlockSize = ST->isDynamicVGPREnabled()
-      ? ST->getDynamicVGPRBlockSize() : 0;
+  DynVGPRBlockSize =
+      ST->isDynamicVGPREnabled() ? ST->getDynamicVGPRBlockSize() : 0;
 
-  LLVM_DEBUG(dbgs() << "AMDGPUSSARegisterAllocator: Processing "
-                    << MF.getName() << "\n");
+  LLVM_DEBUG(dbgs() << "AMDGPUSSARegisterAllocator: Processing " << MF.getName()
+                    << "\n");
 
   classifyVRegs();
   OccupiedRegUnits.clear();

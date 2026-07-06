@@ -59,22 +59,22 @@ class AMDGPUSSARegisterAllocator : public MachineFunctionPass {
   // at Pred's terminator (they would clobber a value live into a sibling
   // successor, or need a scratch register for a cycle), i.e. the critical edge
   // must be split. A non-critical edge never needs splitting.
-  bool edgeCopiesNeedSplit(
-      MachineBasicBlock *Pred, MachineBasicBlock *MBB,
-      ArrayRef<std::pair<MCRegister, MCRegister>> Copies) const;
+  bool
+  edgeCopiesNeedSplit(MachineBasicBlock *Pred, MachineBasicBlock *MBB,
+                      ArrayRef<std::pair<MCRegister, MCRegister>> Copies) const;
   void markOccupied(MCRegister PhysReg);
   void markFree(MCRegister PhysReg);
-  MCRegister pickFreePhysReg(const TargetRegisterClass *RC,
-                              const LiveInterval &VI,
-                              ArrayRef<std::pair<MCRegister, const LiveInterval *>> WiderDefs);
+  MCRegister pickFreePhysReg(
+      const TargetRegisterClass *RC, const LiveInterval &VI,
+      ArrayRef<std::pair<MCRegister, const LiveInterval *>> WiderDefs);
 
   // === SSA Destruction + Operand Rewrite ===
   bool hasCFPseudos(MachineFunction &MF) const;
   void destroySSAAndRewrite(MachineFunction &MF);
   void lowerPHIs(MachineFunction &MF);
-  void resolvePermutation(MachineBasicBlock &MBB,
-                          MachineBasicBlock::iterator InsertPt,
-                          SmallVectorImpl<std::pair<MCRegister, MCRegister>> &Copies);
+  void resolvePermutation(
+      MachineBasicBlock &MBB, MachineBasicBlock::iterator InsertPt,
+      SmallVectorImpl<std::pair<MCRegister, MCRegister>> &Copies);
   void emitSwap(MachineBasicBlock &MBB, MachineBasicBlock::iterator InsertPt,
                 MCRegister RegA, MCRegister RegB);
   void rewriteOperands(MachineFunction &MF);
