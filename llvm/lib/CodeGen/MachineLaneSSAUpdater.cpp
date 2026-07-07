@@ -755,46 +755,58 @@ Register MachineLaneSSAUpdater::buildRSForSuperUse(
     LanesToExtend.push_back(LanesFromNew);
   }
 
-  // Add source for lanes from OldVR (unchanged lanes)
-  // Handle both contiguous and non-contiguous lane masks
-  // Non-contiguous example: Redefining only sub2 of vreg_128 leaves
-  // LanesFromOld = sub0+sub1+sub3
-  if (LanesFromOld.any()) {
-    unsigned SubIdx = getSubRegIndexForLaneMask(LanesFromOld, &TRI);
-
-    if (SubIdx) {
-      // Contiguous case: single subregister covers all lanes
-      RS.addReg(OldVR, 0, SubIdx).addImm(DestSub(LanesFromOld)); // OldVR.subIdx
-      AddedSubIdxs.insert(SubIdx);
-      LanesToExtend.push_back(LanesFromOld);
-    } else {
-      // Non-contiguous case: decompose into multiple subregisters
-      const TargetRegisterClass *OldRC = MRI.getRegClass(OldVR);
-      SmallVector<unsigned, 4> CoveringSubRegs =
-          getCoveringSubRegsForLaneMask(LanesFromOld, &TRI, OldRC);
-
-      assert(
-          !CoveringSubRegs.empty() &&
-          "Failed to decompose non-contiguous lane mask into covering subregs");
-
-      LLVM_DEBUG(dbgs() << "        Non-contiguous LanesFromOld="
-                        << PrintLaneMask(LanesFromOld) << " decomposed into "
-                        << CoveringSubRegs.size() << " subregs\n");
-
-      // Add each covering subregister as a source to the REG_SEQUENCE
-      for (unsigned CoverSubIdx : CoveringSubRegs) {
-        LaneBitmask CoverMask = TRI.getSubRegIndexLaneMask(CoverSubIdx);
-        RS.addReg(OldVR, 0, CoverSubIdx)
-            .addImm(DestSub(CoverMask)); // OldVR.CoverSubIdx
-        AddedSubIdxs.insert(CoverSubIdx);
-        LanesToExtend.push_back(CoverMask);
-
-        LLVM_DEBUG(dbgs() << "          Added source: OldVR."
-                          << TRI.getSubRegIndexName(CoverSubIdx) << " covering "
-                          << PrintLaneMask(CoverMask) << "\n");
-      }
-    }
+  // Add sources for lanes from OldVR (unchanged lanes). Split them into lanes
+  // OldVR actually defines at the use and lanes that are undef there: a wide
+  // value may be only partially defined (e.g. a buffer descriptor whose base
+  // pointer is never written / is poison, read whole by BUFFER ops). The
+  // original whole-register use is legal because the undef establishing def
+  // covers all lanes; the decomposed REG_SEQUENCE must likewise cover them, so
+  // the undef remainder is sourced with the undef flag. A plain read would be
+  // Reading virtual register without a def, and omitting it would leave Dest
+  // partially undef and move the same error onto Dest's recompute.
+  // A lane is undef only where OldVR never defines it: a lane with no subrange
+  // (in a subrange-having vreg), or - when there are no subranges - none, since
+  // the vreg is then a single fully-defined value covered by its main range.
+  // (Do NOT use liveAt(QueryIdx): QueryIdx is the base slot and a defined value
+  // may not be liveAt that exact boundary, which would wrongly mark it undef.)
+  LaneBitmask DefinedOld = LaneBitmask::getNone();
+  if (LI.hasSubRanges()) {
+    for (const LiveInterval::SubRange &SR : LI.subranges())
+      DefinedOld |= SR.LaneMask;
+  } else {
+    DefinedOld = MRI.getMaxLaneMaskForVReg(OldVR);
   }
+
+  auto AddOldSources = [&](LaneBitmask Lanes, bool Undef) {
+    if (Lanes.none())
+      return;
+    unsigned Flags = Undef ? RegState::Undef : 0;
+    if (unsigned SubIdx = getSubRegIndexForLaneMask(Lanes, &TRI)) {
+      // Contiguous: a single subregister covers all lanes.
+      RS.addReg(OldVR, Flags, SubIdx).addImm(DestSub(Lanes));
+      AddedSubIdxs.insert(SubIdx);
+      if (!Undef)
+        LanesToExtend.push_back(Lanes);
+      return;
+    }
+    // Non-contiguous: decompose into covering subregisters (e.g. redefining
+    // only sub2 of a vreg_128 leaves sub0+sub1+sub3).
+    const TargetRegisterClass *OldRC = MRI.getRegClass(OldVR);
+    SmallVector<unsigned, 4> CoveringSubRegs =
+        getCoveringSubRegsForLaneMask(Lanes, &TRI, OldRC);
+    assert(!CoveringSubRegs.empty() &&
+           "Failed to decompose non-contiguous lane mask into covering subregs");
+    for (unsigned CoverSubIdx : CoveringSubRegs) {
+      LaneBitmask CoverMask = TRI.getSubRegIndexLaneMask(CoverSubIdx);
+      RS.addReg(OldVR, Flags, CoverSubIdx).addImm(DestSub(CoverMask));
+      AddedSubIdxs.insert(CoverSubIdx);
+      if (!Undef)
+        LanesToExtend.push_back(CoverMask);
+    }
+  };
+
+  AddOldSources(LanesFromOld & DefinedOld, /*Undef=*/false);
+  AddOldSources(LanesFromOld & ~DefinedOld, /*Undef=*/true);
 
   assert(!AddedSubIdxs.empty() && "REG_SEQUENCE must have at least one source");
 
