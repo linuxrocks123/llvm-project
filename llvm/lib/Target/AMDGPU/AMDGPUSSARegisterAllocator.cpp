@@ -291,12 +291,17 @@ void AMDGPUSSARegisterAllocator::color() {
           ColorMap[Reg] = Chosen;
           markOccupied(Chosen);
 
-          const TargetRegisterClass *RC = MRI->getRegClass(Reg);
           unsigned Idx = TRI->getHWRegIndex(Chosen);
-          unsigned W = TRI->getRegSizeInBits(*RC) / 32;
-          if (TRI->isVGPRClass(RC))
+          unsigned W = TRI->getRegSizeInBits(*MRI->getRegClass(Reg)) / 32;
+          // Classify by the CHOSEN physical register's file, not the vreg's
+          // class: an AV (AGPR-or-VGPR) vreg is not isVGPRClass, so tracking by
+          // vreg class would leave its high-water untracked.
+          const TargetRegisterClass *PhysRC = TRI->getPhysRegBaseClass(Chosen);
+          if (TRI->isVGPRClass(PhysRC))
             MaxVGPRIdx = std::max(MaxVGPRIdx, Idx + W);
-          else if (TRI->isSGPRClass(RC))
+          else if (TRI->isAGPRClass(PhysRC))
+            MaxAGPRIdx = std::max(MaxAGPRIdx, Idx + W);
+          else if (TRI->isSGPRClass(PhysRC))
             MaxSGPRIdx = std::max(MaxSGPRIdx, Idx + W);
         }
       }
@@ -441,10 +446,14 @@ void AMDGPUSSARegisterAllocator::resolvePermutation(
     // cycles, and the walk traces the full cycle regardless of entry point.
     MCRegister CycleStart = DstToSrc.begin()->first;
 
-    bool IsVGPR = TRI->isVGPRClass(TRI->getPhysRegBaseClass(CycleStart));
-    unsigned &MaxIdx = IsVGPR ? MaxVGPRIdx : MaxSGPRIdx;
+    const TargetRegisterClass *CycleRC = TRI->getPhysRegBaseClass(CycleStart);
+    bool IsVGPR = TRI->isVGPRClass(CycleRC);
+    bool IsAGPR = TRI->isAGPRClass(CycleRC);
+    unsigned &MaxIdx =
+        IsVGPR ? MaxVGPRIdx : (IsAGPR ? MaxAGPRIdx : MaxSGPRIdx);
+    // AGPRs draw from the vector register budget alongside VGPRs.
     unsigned MaxHWLimit =
-        IsVGPR ? ST->getMaxNumVGPRs(MF) : ST->getMaxNumSGPRs(MF);
+        (IsVGPR || IsAGPR) ? ST->getMaxNumVGPRs(MF) : ST->getMaxNumSGPRs(MF);
     unsigned CurrentOcc =
         IsVGPR ? ST->getOccupancyWithNumVGPRs(MaxIdx, DynVGPRBlockSize)
                : ST->getOccupancyWithNumSGPRs(MaxIdx);
@@ -470,6 +479,13 @@ void AMDGPUSSARegisterAllocator::resolvePermutation(
     bool UseScratch;
     if (IsVGPR) {
       UseScratch = !ST->hasSwap() && ScratchOcc == CurrentOcc && ScratchFits;
+    } else if (IsAGPR) {
+      // AGPRs have no swap or XOR primitive, so an in-place emitSwap is
+      // impossible; a scratch AGPR (plain COPYs, legalized to AGPR moves
+      // downstream) is the only way to break the cycle.
+      UseScratch = true;
+      assert(ScratchFits &&
+             "AGPR permutation cycle with no free scratch register");
     } else {
       bool SccDead = MBB.computeRegisterLiveness(TRI, AMDGPU::SCC, InsertPt) ==
                      MachineBasicBlock::LQR_Dead;
@@ -480,8 +496,10 @@ void AMDGPUSSARegisterAllocator::resolvePermutation(
     }
 
     if (UseScratch && ScratchFits) {
-      MCRegister ScratchBase = IsVGPR ? MCRegister(AMDGPU::VGPR0 + MaxIdx)
-                                      : MCRegister(AMDGPU::SGPR0 + MaxIdx);
+      MCRegister ScratchBase =
+          IsVGPR ? MCRegister(AMDGPU::VGPR0 + MaxIdx)
+                 : IsAGPR ? MCRegister(AMDGPU::AGPR0 + MaxIdx)
+                          : MCRegister(AMDGPU::SGPR0 + MaxIdx);
       MCRegister Scratch =
           (CycleWidth == 1)
               ? ScratchBase
@@ -628,7 +646,18 @@ void AMDGPUSSARegisterAllocator::rewriteOperands(MachineFunction &MF) {
 
         Register VReg = MO.getReg();
         MCRegister PhysReg = ColorMap.lookup(VReg);
-        assert(PhysReg && "Virtual register not colored");
+        if (!PhysReg) {
+          // A vreg that only ever appears as an `undef` operand has no value to
+          // color (no def drives it). Its content is a don't-care; assign any
+          // allocatable physreg of its class so the operand is well-formed. The
+          // `undef` flag is preserved by setReg, so the verifier permits the
+          // read of an otherwise-undefined physreg.
+          assert(MO.isUndef() && "non-undef virtual register not colored");
+          const TargetRegisterClass *RC = MRI->getRegClass(VReg);
+          ArrayRef<MCPhysReg> Order = RegClassInfo.getOrder(RC);
+          assert(!Order.empty() && "empty allocation order for undef operand");
+          PhysReg = Order.front();
+        }
 
         unsigned SubIdx = MO.getSubReg();
         if (SubIdx) {
@@ -718,8 +747,30 @@ void AMDGPUSSARegisterAllocator::eliminateRegSequences(MachineFunction &MF) {
         if (MCRegister SubSrc = TRI->getSubReg(Src, SubIdx))
           Src = SubSrc;
         MCRegister Expected = TRI->getSubReg(Dst, SubIdx);
-        if (Src != Expected)
-          Copies.push_back({Src, Expected});
+        if (Expected) {
+          if (Src != Expected)
+            Copies.push_back({Src, Expected});
+          continue;
+        }
+        // SubIdx names no physical subregister of Dst: alignment-constrained
+        // files have no tuple at this offset (SGPR tuples >=64-bit are generated
+        // at aligned bases only, e.g. sub1_sub2 of an SGPR_96 == s1_2 does not
+        // exist). Lower it as per-dword 32-bit copies, whose subregisters always
+        // exist. Src is exactly the slice width here, so its dwords map 1:1 onto
+        // the destination dwords of the slice.
+        unsigned First = TRI->getChannelFromSubReg(SubIdx);
+        unsigned NumDW = TRI->getSubRegIdxSize(SubIdx) / 32;
+        for (unsigned K = 0; K < NumDW; ++K) {
+          MCRegister D =
+              TRI->getSubReg(Dst, SIRegisterInfo::getSubRegFromChannel(First + K));
+          MCRegister S =
+              (NumDW == 1)
+                  ? Src
+                  : TRI->getSubReg(Src, SIRegisterInfo::getSubRegFromChannel(K));
+          assert(D && S && "per-dword subregister must exist");
+          if (S != D)
+            Copies.push_back({S, D});
+        }
       }
       resolvePermutation(MBB, MI, Copies);
       MI.eraseFromParent();
@@ -765,6 +816,7 @@ bool AMDGPUSSARegisterAllocator::runOnMachineFunction(MachineFunction &MF) {
   ColorMap.clear();
   MaxVGPRIdx = 0;
   MaxSGPRIdx = 0;
+  MaxAGPRIdx = 0;
 
   color();
   destroySSAAndRewrite(MF);

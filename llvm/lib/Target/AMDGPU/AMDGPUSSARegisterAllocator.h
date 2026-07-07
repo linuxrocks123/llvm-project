@@ -49,6 +49,7 @@ class AMDGPUSSARegisterAllocator : public MachineFunctionPass {
   BitVector OccupiedRegUnits;
   unsigned MaxVGPRIdx = 0;
   unsigned MaxSGPRIdx = 0;
+  unsigned MaxAGPRIdx = 0;
   unsigned DynVGPRBlockSize = 0;
 
   // === Coloring ===

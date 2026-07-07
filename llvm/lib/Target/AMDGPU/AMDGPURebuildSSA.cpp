@@ -18,6 +18,7 @@
 #include "GCNSubtarget.h"
 #include "SIInstrInfo.h"
 #include "SIRegisterInfo.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineDominators.h"
@@ -46,6 +47,10 @@ public:
   }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
+
+  // Collapse nested REG_SEQUENCE towers produced by lane-by-lane
+  // reconstruction into flat REG_SEQUENCEs (see definition).
+  void flattenRegSequences(MachineFunction &MF);
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequiredTransitiveID(MachineDominatorsID);
@@ -103,16 +108,62 @@ bool AMDGPURebuildSSALegacy::runOnMachineFunction(MachineFunction &MF) {
         LLVM_DEBUG(dbgs() << "\n[VREG] " << printReg(VReg) << " has "
                           << LI.getNumValNums() << " VNs\n");
 
-        // Find the earliest non-PHI definition in dom-preorder.
-        // This is the unique original SSA def that anchors the vreg.
+        // Order defs by dominator-tree preorder, breaking ties within a block
+        // by definition slot, so the establishing (earliest) def sorts first.
+        auto IsEarlier = [&](VNInfo *A, VNInfo *B) {
+          unsigned PA = DomPreorder[LIS->getMBBFromIndex(A->def)];
+          unsigned PB = DomPreorder[LIS->getMBBFromIndex(B->def)];
+          if (PA != PB)
+            return PA < PB;
+          return A->def < B->def;
+        };
+
+        // A wide vreg can be assembled by a chain of partial subregister defs
+        // where every def after the first read-modify-writes the super-register
+        // (a subreg def without `undef` implicitly reads the lanes it does not
+        // write). Such re-defs depend on earlier defs, so later defs must be
+        // renamed before earlier ones (Root, the establishing def, stays last),
+        // otherwise recomputing OrigVReg's interval mid-chain reads lanes whose
+        // def was just renamed away.
+        //
+        // This reverse-order handling is only safe for an RMW chain confined to
+        // ONE block (a dominance chain by slot; never loop-carried, where a
+        // back-edge read is not from a dominator). Multi-block/loop vregs keep
+        // the original handling.
+        const MachineBasicBlock *DefBlock = nullptr;
+        bool SingleBlock = true;
+        for (const MachineOperand &MO : MRI->def_operands(VReg)) {
+          const MachineBasicBlock *B = MO.getParent()->getParent();
+          if (!DefBlock)
+            DefBlock = B;
+          else if (DefBlock != B) {
+            SingleBlock = false;
+            break;
+          }
+        }
+        bool HasRMWRedef = false;
+        if (SingleBlock)
+          for (const MachineOperand &MO : MRI->def_operands(VReg))
+            if (MO.getSubReg() && !MO.isUndef()) {
+              HasRMWRedef = true;
+              break;
+            }
+
+        // Find the establishing (earliest) non-PHI definition. This is the
+        // unique original SSA def that anchors the vreg. For an RMW chain the
+        // earliest (slot-ordered) def must win so it becomes Root and is kept.
         VNInfo *Root = nullptr;
         for (VNInfo *V : LI.vnis()) {
           if (!V || V->isUnused() || V->isPHIDef())
             continue;
-          if (!Root ||
-              DomPreorder[LIS->getMBBFromIndex(V->def)] <
-              DomPreorder[LIS->getMBBFromIndex(Root->def)])
+          if (HasRMWRedef) {
+            if (!Root || IsEarlier(V, Root))
+              Root = V;
+          } else if (!Root ||
+                     DomPreorder[LIS->getMBBFromIndex(V->def)] <
+                         DomPreorder[LIS->getMBBFromIndex(Root->def)]) {
             Root = V;
+          }
         }
 
         // Collect re-defs (non-Root, non-PHI) in dom-preorder, Root last.
@@ -125,6 +176,10 @@ bool AMDGPURebuildSSALegacy::runOnMachineFunction(MachineFunction &MF) {
           if (V && !V->isUnused() && !V->isPHIDef() && V != Root)
             WorkList.push_back(V);
         llvm::sort(WorkList, [&](VNInfo *A, VNInfo *B) {
+          // Single-block RMW chains: rename later defs first (descending) so a
+          // rename never strips lanes an earlier, still-present RMW def reads.
+          if (HasRMWRedef)
+            return IsEarlier(B, A);
           MachineBasicBlock *BBA = LIS->getMBBFromIndex(A->def);
           MachineBasicBlock *BBB = LIS->getMBBFromIndex(B->def);
           if (DomPreorder[BBA] != DomPreorder[BBB])
@@ -148,6 +203,10 @@ bool AMDGPURebuildSSALegacy::runOnMachineFunction(MachineFunction &MF) {
           MachineInstr *DefMI = LIS->getInstructionFromIndex(VNI->def);
           assert(DefMI && "non-PHI VNInfo must have an instruction");
           if (VNI == Root) {
+            // Root is processed last. For a single-block RMW chain the re-defs
+            // have already been renamed by now, so narrowing a subreg Root here
+            // breaks nothing and avoids leaving OrigVReg as a wide register with
+            // only a subset of lanes live (which would inflate pressure).
             int Idx = DefMI->findRegisterDefOperandIdx(VReg, TRI,
                                                        /*IsDead=*/false,
                                                        /*Overlaps=*/true);
@@ -163,6 +222,11 @@ bool AMDGPURebuildSSALegacy::runOnMachineFunction(MachineFunction &MF) {
 
   Processed.clear();
 
+  // Flatten nested REG_SEQUENCE towers the reconstruction produced, so wide
+  // values rebuilt lane-by-lane don't carry growing-width live intermediates
+  // into register allocation.
+  flattenRegSequences(MF);
+
   MF.getProperties().set(MachineFunctionProperties::Property::IsSSA);
   MF.getProperties().reset(MachineFunctionProperties::Property::NoPHIs);
   // Re-SSA-ifying turns rewritten two-address tied operands back into distinct
@@ -174,6 +238,95 @@ bool AMDGPURebuildSSALegacy::runOnMachineFunction(MachineFunction &MF) {
     MF.verify();
   });
   return MRI->isSSA();
+}
+
+// Collapse nested REG_SEQUENCE towers into flat REG_SEQUENCEs.
+//
+// Lane-by-lane SSA reconstruction rewrites each partial re-def by wrapping the
+// prior value in a 2-source REG_SEQUENCE, so a wide value rebuilt from many
+// single-lane defs becomes a chain of growing-width intermediates
+// (areg_64 -> areg_96 -> ... -> areg_384). Every intermediate is a live wide
+// tuple; with no coalescer they inflate register pressure (observed: an MFMA
+// accumulator using 43 AGPRs instead of 32, dropping occupancy 8 -> 5).
+// Inlining a single-use, whole-register REG_SEQUENCE source leaves one flat
+// REG_SEQUENCE whose only live values are the narrow sources and the result.
+void AMDGPURebuildSSALegacy::flattenRegSequences(MachineFunction &MF) {
+  DenseSet<Register> Touched;
+
+  for (MachineBasicBlock &MBB : MF) {
+    // MI (the parent) is never erased here; only its child REG_SEQUENCEs are,
+    // and in SSA a child (def of a source) precedes MI, so erasing it never
+    // invalidates this forward iterator.
+    for (MachineInstr &MI : MBB) {
+      if (!MI.isRegSequence())
+        continue;
+
+      Register PReg = MI.getOperand(0).getReg();
+      LaneBitmask PFull = MRI->getMaxLaneMaskForVReg(PReg);
+
+      // Drain this parent's tower: repeatedly inline a single-use, whole-read
+      // child REG_SEQUENCE source until none remain (inlining one may expose a
+      // grandchild as a new direct source).
+      bool Inlined = true;
+      while (Inlined) {
+        Inlined = false;
+        for (unsigned I = 1; I < MI.getNumOperands(); I += 2) {
+          MachineOperand &SrcMO = MI.getOperand(I);
+          if (!SrcMO.isReg() || SrcMO.getSubReg() ||
+              !SrcMO.getReg().isVirtual())
+            continue;
+          MachineInstr *Child = MRI->getVRegDef(SrcMO.getReg());
+          if (!Child || !Child->isRegSequence() ||
+              !MRI->hasOneNonDBGUse(SrcMO.getReg()))
+            continue;
+
+          unsigned DestSub = MI.getOperand(I + 1).getImm();
+          // Append each child source, mapping its child-local dest lanes into
+          // the parent's namespace via lane masks. (composeSubRegIndices is
+          // unsafe: it silently mis-handles compositions that do not land on a
+          // defined subreg index, which AMDGPU's irregular areg lattice can
+          // produce.)
+          for (unsigned J = 1; J < Child->getNumOperands(); J += 2) {
+            MachineOperand CS = Child->getOperand(J); // copy: preserves undef
+            CS.setIsKill(false); // liveness recomputed below; avoid stale kills
+            unsigned CSub = Child->getOperand(J + 1).getImm();
+            LaneBitmask ChildLanes = TRI->getSubRegIndexLaneMask(CSub);
+            LaneBitmask PLanes =
+                TRI->composeSubRegIndexLaneMask(DestSub, ChildLanes);
+            unsigned Composed =
+                (PLanes == PFull) ? 0 : TRI->getSubRegIndexForLaneMask(PLanes);
+            assert((PLanes == PFull || Composed) &&
+                   "flattened REG_SEQUENCE slice has no subreg index");
+            MI.addOperand(MF, CS);
+            MI.addOperand(MF, MachineOperand::CreateImm(Composed));
+            if (CS.getReg().isVirtual())
+              Touched.insert(CS.getReg());
+          }
+
+          // Drop the inlined (Src, DestSub) pair; added sources are at the end,
+          // so these indices are still valid. Then erase the now-dead child.
+          MI.removeOperand(I + 1);
+          MI.removeOperand(I);
+
+          Register Dead = Child->getOperand(0).getReg();
+          LIS->RemoveMachineInstrFromMaps(*Child);
+          Child->eraseFromParent();
+          LIS->removeInterval(Dead);
+
+          Inlined = true;
+          break; // MI's operand list changed; re-scan it
+        }
+      }
+    }
+  }
+
+  // Inlined sources' single use moved from the erased child to the parent MI;
+  // recompute their intervals. Parent results are unchanged (same def/uses).
+  for (Register R : Touched)
+    if (R.isVirtual() && LIS->hasInterval(R)) {
+      LIS->removeInterval(R);
+      LIS->createAndComputeVirtRegInterval(R);
+    }
 }
 
 char AMDGPURebuildSSALegacy::ID = 0;

@@ -458,13 +458,20 @@ void MachineLaneSSAUpdater::rewriteUseReaching(
   }
 
   // Partial: compose Owned lanes from NewSSA; the remaining lanes stay OrigVReg
-  // (Root/final or a placeholder patched by their owner). REG_SEQUENCE result
-  // is sized to the use's lanes as a whole register. The RS result is a whole
-  // register sized to the use's lanes. The operand already names those lanes
-  // via its subreg, so take its class directly.
+  // (Root/final or a placeholder patched by their owner). The REG_SEQUENCE
+  // result is a fresh whole register that only needs to hold OpMask-many lanes.
+  // The operand may name an UNALIGNED subregister of OrigVReg (e.g.
+  // sub1_sub2_sub3 of an sgpr_128, formed while iteratively rebuilding a
+  // partial-def chain), for which getSubRegisterClass(OpRC, MO.getSubReg()) is
+  // null. Derive the class from the base-0 (rebased) lane mask instead, which
+  // maps to an aligned, valid subregister index of OpRC.
   const TargetRegisterClass *OpRC = MRI.getRegClass(MO.getReg());
+  LaneBitmask FullRC = MRI.getMaxLaneMaskForVReg(MO.getReg());
+  LaneBitmask RebasedUse = rebaseLaneMask(OpMask, OpMask);
+  unsigned UseSub =
+      (RebasedUse == FullRC) ? 0 : getSubRegIndexForLaneMask(RebasedUse, &TRI);
   const TargetRegisterClass *UseRC =
-      MO.getSubReg() ? TRI.getSubRegisterClass(OpRC, MO.getSubReg()) : OpRC;
+      UseSub ? TRI.getSubRegisterClass(OpRC, UseSub) : OpRC;
   assert(UseRC && "use operand subreg has no register class");
   SmallVector<LaneBitmask, 4> LanesToExtend;
   SlotIndex RSIdx;
