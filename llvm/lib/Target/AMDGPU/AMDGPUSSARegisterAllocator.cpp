@@ -235,8 +235,13 @@ void AMDGPUSSARegisterAllocator::color() {
         if (!MI.isPHI()) {
           SlotIndex NextSI =
               LIS->getInstructionIndex(MI).getRegSlot().getNextSlot();
-          for (const MachineOperand &MO : MI.uses()) {
-            if (!MO.isReg())
+          // Iterate all operands filtered by the isUse flag rather than
+          // MI.uses(): the range helpers key off operand POSITION
+          // (getNumExplicitDefs), which is wrong for variadic instructions with
+          // flag-interspersed operands (e.g. INLINEASM), whose def operands are
+          // not leading. MI.uses() would then wrongly include those defs.
+          for (const MachineOperand &MO : MI.operands()) {
+            if (!MO.isReg() || !MO.isUse())
               continue;
             Register Reg = MO.getReg();
             if (Reg.isPhysical()) {
@@ -257,7 +262,22 @@ void AMDGPUSSARegisterAllocator::color() {
           }
         }
 
-        for (MachineOperand &MO : MI.defs()) {
+        // Iterate all operands filtered by the isDef flag rather than
+        // MI.defs(): the range helper returns only the leading explicit defs
+        // ([0, getNumExplicitDefs())), which is empty for variadic instructions
+        // like INLINEASM (getNumExplicitDefs()==0). Their def operands sit after
+        // the asm string and flag immediates, so MI.defs() misses them and the
+        // vreg they define never gets colored. Flag-based filtering visits every
+        // real def regardless of operand position; flag immediates are !isReg().
+        for (MachineOperand &MO : MI.operands()) {
+          // Explicit defs only: implicit defs are call/instr clobbers (e.g.
+          // implicit-def $scc, $sgpr32, and call clobber lists). MI.defs()
+          // excluded them and coloring relied on that; marking them occupied
+          // here (never freed) exhausts the file. INLINEASM's constraint reg
+          // defs are explicit (only its clobbers are implicit), so they remain
+          // covered.
+          if (!MO.isReg() || !MO.isDef() || MO.isImplicit())
+            continue;
           Register Reg = MO.getReg();
           if (!Reg.isVirtual()) {
             markOccupied(Reg);
