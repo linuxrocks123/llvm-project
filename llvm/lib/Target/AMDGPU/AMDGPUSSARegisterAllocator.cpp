@@ -227,12 +227,29 @@ void AMDGPUSSARegisterAllocator::color() {
       seedOccupiedAtBBEntry(MBB);
 
       for (MachineInstr &MI : *MBB) {
+        // Physreg units / colored-vreg physregs whose freeing is deferred past
+        // an early-clobber def (see below), freed after this instruction's defs
+        // are colored.
+        SmallVector<MCRegUnit, 8> DeferredUnits;
+        SmallVector<MCRegister, 4> DeferredFree;
+
         // Kill uses before coloring defs: a def can reuse the physreg of
         // a source that dies at this instruction (no interference without
         // early-clobber). PHIs skipped: their sources are live only to
         // predecessor boundaries, and markFree would clear physregs that
         // preceding PHI defs already claimed.
         if (!MI.isPHI()) {
+          // An early-clobber def is live while this instruction's uses are read,
+          // so it must NOT reuse a dying use's physreg. Defer freeing dying uses
+          // until after defs are colored (they are still freed for later
+          // instructions, so no leak); non-early-clobber defs on other
+          // instructions keep the reuse optimization.
+          bool HasEC = false;
+          for (const MachineOperand &MO : MI.operands())
+            if (MO.isReg() && MO.isDef() && MO.isEarlyClobber()) {
+              HasEC = true;
+              break;
+            }
           SlotIndex NextSI =
               LIS->getInstructionIndex(MI).getRegSlot().getNextSlot();
           // Iterate all operands filtered by the isUse flag rather than
@@ -246,18 +263,26 @@ void AMDGPUSSARegisterAllocator::color() {
             Register Reg = MO.getReg();
             if (Reg.isPhysical()) {
               for (MCRegUnit Unit : TRI->regunits(Reg))
-                if (!LIS->getRegUnit(Unit).liveAt(NextSI))
-                  OccupiedRegUnits.reset(Unit);
+                if (!LIS->getRegUnit(Unit).liveAt(NextSI)) {
+                  if (HasEC)
+                    DeferredUnits.push_back(Unit);
+                  else
+                    OccupiedRegUnits.reset(Unit);
+                }
               continue;
             }
             auto It = ColorMap.find(Reg);
             if (It == ColorMap.end())
               continue;
             if (!LIS->getInterval(Reg).liveAt(NextSI)) {
-              markFree(It->second);
-              LLVM_DEBUG(dbgs()
-                         << "    kill: " << printReg(Reg, TRI) << " free "
-                         << TRI->getName(It->second) << "\n");
+              if (HasEC) {
+                DeferredFree.push_back(It->second);
+              } else {
+                markFree(It->second);
+                LLVM_DEBUG(dbgs()
+                           << "    kill: " << printReg(Reg, TRI) << " free "
+                           << TRI->getName(It->second) << "\n");
+              }
             }
           }
         }
@@ -324,6 +349,13 @@ void AMDGPUSSARegisterAllocator::color() {
           else if (TRI->isSGPRClass(PhysRC))
             MaxSGPRIdx = std::max(MaxSGPRIdx, Idx + W);
         }
+
+        // Free dying uses deferred past an early-clobber def now that its defs
+        // are colored (they could not reuse these physregs).
+        for (MCRegUnit Unit : DeferredUnits)
+          OccupiedRegUnits.reset(Unit);
+        for (MCRegister PR : DeferredFree)
+          markFree(PR);
       }
     }
   }
