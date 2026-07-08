@@ -50,6 +50,9 @@ class AMDGPUSSARegisterAllocator : public MachineFunctionPass {
   unsigned MaxVGPRIdx = 0;
   unsigned MaxSGPRIdx = 0;
   unsigned MaxAGPRIdx = 0;
+  // (call def-slot, call instruction) for every call; a vreg live across a call
+  // must avoid every register the call clobbers (regmask + explicit defs).
+  SmallVector<std::pair<SlotIndex, const MachineInstr *>, 8> CallSites;
   unsigned DynVGPRBlockSize = 0;
 
   // === Coloring ===

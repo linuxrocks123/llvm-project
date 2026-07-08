@@ -99,6 +99,25 @@ MCRegister AMDGPUSSARegisterAllocator::pickFreePhysReg(
         Free = false;
         break;
       }
+    // A value live across a call cannot occupy a register the call clobbers
+    // (regmask-clobbered caller-saved regs, or an explicit def such as the
+    // return-address $sgpr30_sgpr31) - it would be undefined after the call.
+    if (Free)
+      for (const auto &[CallIdx, CallMI] : CallSites) {
+        if (!VI.liveAt(CallIdx))
+          continue;
+        bool Clob = CallMI->modifiesRegister(PR, TRI);
+        if (!Clob)
+          for (const MachineOperand &MO : CallMI->operands())
+            if (MO.isRegMask() && MO.clobbersPhysReg(PR)) {
+              Clob = true;
+              break;
+            }
+        if (Clob) {
+          Free = false;
+          break;
+        }
+      }
     if (Free)
       return PR;
   }
@@ -204,6 +223,47 @@ void AMDGPUSSARegisterAllocator::color() {
   // so seedOccupiedAtBBEntry naturally catches cross-block wider live-ins.
   // For wider defs born mid-block (not live at BBStart), a per-block WiderDefs
   // pre-scan collects them from ColorMap — O(|block|), same cost as the walk.
+
+  // Collect clobber sites: a vreg live across one must not be assigned a
+  // register the instruction clobbers (pickFreePhysReg consults these). Two
+  // kinds: (1) a call regmask, and (2) an instruction with an IMPLICIT physical
+  // register def - e.g. an inline-asm clobber list lowered to implicit-def dead
+  // early-clobber $vgprN, or an instruction-description implicit clobber. These
+  // carry no regmask and define no value, so nothing else models them. EXPLICIT
+  // physreg defs are deliberately excluded: they are real values that the
+  // forward walk already marks occupied within a block, and a call's explicit
+  // result def is already covered because the call is a clobber site via its
+  // regmask (modifiesRegister() catches the explicit def at pick time). Adding
+  // explicit defs here would over-constrain coloring (large, correctness-neutral
+  // allocation churn) without fixing any crash. Reserved registers are skipped:
+  // pickFreePhysReg only ever picks allocatable registers (getOrder excludes
+  // reserved), which share no reg unit with a reserved-only def.
+  CallSites.clear();
+  for (auto *Node : depth_first(MDT->getRootNode()))
+    for (MachineInstr &MI : *Node->getBlock()) {
+      bool IsClobberSite = false;
+      for (const MachineOperand &MO : MI.operands()) {
+        if (MO.isRegMask()) {
+          // Fold the call's clobbers into MRI's used-physreg mask. The RA
+          // framework (which we bypass) normally does this; without it
+          // MRI::UsedPhysRegMask stays empty and MRI.isPhysRegUsed() reports
+          // call-clobbered registers as unused. PrologEpilogInserter's
+          // findUnusedRegister() would then pick a call-clobbered SGPR as the
+          // whole-function frame-pointer save register, giving a value the call
+          // destroys (read as undefined at restore). setBitsNotInMask marks the
+          // registers the mask does NOT preserve, i.e. exactly the clobbers.
+          MRI->addPhysRegsUsedFromRegMask(MO.getRegMask());
+          IsClobberSite = true;
+        } else if (MO.isReg() && MO.isDef() && MO.isImplicit() &&
+                   MO.getReg().isPhysical() &&
+                   !MRI->isReserved(MO.getReg().asMCReg())) {
+          IsClobberSite = true;
+        }
+      }
+      if (IsClobberSite)
+        CallSites.push_back({LIS->getInstructionIndex(MI).getRegSlot(), &MI});
+    }
+
   for (unsigned Width : ColoringOrder) {
     for (auto *Node : depth_first(MDT->getRootNode())) {
       MachineBasicBlock *MBB = Node->getBlock();
