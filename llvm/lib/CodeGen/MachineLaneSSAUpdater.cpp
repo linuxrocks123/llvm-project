@@ -755,58 +755,70 @@ Register MachineLaneSSAUpdater::buildRSForSuperUse(
     LanesToExtend.push_back(LanesFromNew);
   }
 
-  // Add sources for lanes from OldVR (unchanged lanes). Split them into lanes
-  // OldVR actually defines at the use and lanes that are undef there: a wide
-  // value may be only partially defined (e.g. a buffer descriptor whose base
-  // pointer is never written / is poison, read whole by BUFFER ops). The
-  // original whole-register use is legal because the undef establishing def
-  // covers all lanes; the decomposed REG_SEQUENCE must likewise cover them, so
-  // the undef remainder is sourced with the undef flag. A plain read would be
-  // Reading virtual register without a def, and omitting it would leave Dest
-  // partially undef and move the same error onto Dest's recompute.
-  // A lane is undef only where OldVR never defines it: a lane with no subrange
-  // (in a subrange-having vreg), or - when there are no subranges - none, since
-  // the vreg is then a single fully-defined value covered by its main range.
-  // (Do NOT use liveAt(QueryIdx): QueryIdx is the base slot and a defined value
-  // may not be liveAt that exact boundary, which would wrongly mark it undef.)
-  LaneBitmask DefinedOld = LaneBitmask::getNone();
-  if (LI.hasSubRanges()) {
-    for (const LiveInterval::SubRange &SR : LI.subranges())
-      DefinedOld |= SR.LaneMask;
-  } else {
-    DefinedOld = MRI.getMaxLaneMaskForVReg(OldVR);
-  }
+  // Source the old (unchanged) lanes per their reaching VNI at the use point
+  // (getVNInfoBefore via collectReachingVNIs) -- the value the original whole-
+  // register use actually read there:
+  //   * null  -> the lane is dead/undef at this use (e.g. a poison buffer
+  //              descriptor base read whole by a later store) -> undef source.
+  //              A plain read would be "Reading virtual register without a def".
+  //   * a def renamed this session -> its renamed vreg. Resolve now so the
+  //     result is independent of session/patch order (a placeholder would never
+  //     be patched if that lane's rewrite already ran).
+  //   * a live, not-yet/never-renamed def -> an OrigVReg placeholder, patched by
+  //     that def's own rewrite or kept as the Root/final value.
+  // Per-use-point liveness (NOT the global "has a subrange" test) is required:
+  // OrigVReg may own a subrange for a lane that is nonetheless dead here.
+  auto AddOldGroup = [&](LaneBitmask PieceLanes, VNInfo *V) {
+    Register SrcReg = OldVR;
+    LaneBitmask SrcBase = LaneBitmask::getNone();
+    bool Undef = false, Live = false;
+    if (!V)
+      Undef = true;
+    else if (const RenamedDef *RD = renamedForReachingVNI(V)) {
+      SrcReg = RD->VReg;
+      SrcBase = RD->OrigLanes;
+    } else
+      Live = true;
 
-  auto AddOldSources = [&](LaneBitmask Lanes, bool Undef) {
-    if (Lanes.none())
-      return;
-    unsigned Flags = Undef ? RegState::Undef : 0;
-    if (unsigned SubIdx = getSubRegIndexForLaneMask(Lanes, &TRI)) {
-      // Contiguous: a single subregister covers all lanes.
-      RS.addReg(OldVR, Flags, SubIdx).addImm(DestSub(Lanes));
-      AddedSubIdxs.insert(SubIdx);
-      if (!Undef)
-        LanesToExtend.push_back(Lanes);
-      return;
-    }
-    // Non-contiguous: decompose into covering subregisters (e.g. redefining
-    // only sub2 of a vreg_128 leaves sub0+sub1+sub3).
-    const TargetRegisterClass *OldRC = MRI.getRegClass(OldVR);
-    SmallVector<unsigned, 4> CoveringSubRegs =
-        getCoveringSubRegsForLaneMask(Lanes, &TRI, OldRC);
-    assert(!CoveringSubRegs.empty() &&
-           "Failed to decompose non-contiguous lane mask into covering subregs");
-    for (unsigned CoverSubIdx : CoveringSubRegs) {
-      LaneBitmask CoverMask = TRI.getSubRegIndexLaneMask(CoverSubIdx);
-      RS.addReg(OldVR, Flags, CoverSubIdx).addImm(DestSub(CoverMask));
-      AddedSubIdxs.insert(CoverSubIdx);
-      if (!Undef)
-        LanesToExtend.push_back(CoverMask);
-    }
+    auto EmitCover = [&](LaneBitmask CovLanes) {
+      unsigned Flags = Undef ? RegState::Undef : 0;
+      unsigned Sub;
+      if (SrcReg == OldVR)
+        Sub = getSubRegIndexForLaneMask(CovLanes, &TRI);
+      else {
+        LaneBitmask RLane = rebaseLaneMask(CovLanes, SrcBase);
+        LaneBitmask RFull = MRI.getMaxLaneMaskForVReg(SrcReg);
+        Sub = (RLane == RFull) ? 0 : getSubRegIndexForLaneMask(RLane, &TRI);
+      }
+      RS.addReg(SrcReg, Flags, Sub).addImm(DestSub(CovLanes));
+      AddedSubIdxs.insert(getSubRegIndexForLaneMask(CovLanes, &TRI));
+      if (Live)
+        LanesToExtend.push_back(CovLanes);
+    };
+
+    // Emit covering subregisters so a non-contiguous group (e.g. sub0+sub1+sub3)
+    // is split into valid subregister sources.
+    if (getSubRegIndexForLaneMask(PieceLanes, &TRI))
+      EmitCover(PieceLanes);
+    else
+      for (unsigned CoverSubIdx : getCoveringSubRegsForLaneMask(
+               PieceLanes, &TRI, MRI.getRegClass(OldVR)))
+        EmitCover(TRI.getSubRegIndexLaneMask(CoverSubIdx));
   };
 
-  AddOldSources(LanesFromOld & DefinedOld, /*Undef=*/false);
-  AddOldSources(LanesFromOld & ~DefinedOld, /*Undef=*/true);
+  SmallVector<std::pair<LaneBitmask, VNInfo *>, 4> OldPieces;
+  collectReachingVNIs(*FrozenOrigLI, LanesFromOld, QueryIdx, OldPieces);
+  // collectReachingVNIs only covers lanes that have a subrange; any remaining
+  // old lanes have no establishing def and are undef here.
+  LaneBitmask Covered = LaneBitmask::getNone();
+  for (auto &[L, V] : OldPieces)
+    Covered |= L;
+  if (LaneBitmask NoSub = LanesFromOld & ~Covered; NoSub.any())
+    OldPieces.push_back({NoSub, nullptr});
+
+  for (auto &[PieceLanes, V] : OldPieces)
+    if (PieceLanes.any())
+      AddOldGroup(PieceLanes, V);
 
   assert(!AddedSubIdxs.empty() && "REG_SEQUENCE must have at least one source");
 
