@@ -1901,7 +1901,7 @@ void SIInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
     // Build with or without subregister
     auto MIB = BuildMI(MBB, MI, DL, OpDesc);
     if (SubRegIdx != 0) {
-      MIB.addReg(DestReg, RegState::Define | RegState::Undef, SubRegIdx);
+      MIB.addReg(DestReg, RegState::Define, SubRegIdx);
     } else {
       MIB.addReg(DestReg, RegState::Define);
     }
@@ -1916,7 +1916,7 @@ void SIInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                                                    SpillSize, *MFI);
   auto MIB = BuildMI(MBB, MI, DL, get(Opcode));
   if (SubRegIdx != 0) {
-    MIB.addReg(DestReg, RegState::Define | RegState::Undef, SubRegIdx);
+    MIB.addReg(DestReg, RegState::Define, SubRegIdx);
   } else {
     MIB.addReg(DestReg, RegState::Define);
   }

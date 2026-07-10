@@ -1121,6 +1121,29 @@ AMDGPUSSARegisterSpiller::getOrCreateReloadInBlock(MachineBasicBlock *BB,
   // Get the reload instruction and add to slot indexes
   MachineInstr *ReloadMI = &*std::prev(InsertIt);
   LIS->InsertMachineInstrInMaps(*ReloadMI);
+
+  // loadRegFromStackSlot no longer marks a partial (subreg) reload def undef.
+  // Under reload-as-redef of OrigVReg the un-reloaded (complement) lanes are
+  // usually still live -- they were never spilled -- so the partial redef must
+  // PRESERVE them (an implicit RMW read), keeping them live in the recomputed
+  // interval so the reaching-VNI reconstruction can source them. Mark the def
+  // undef only in the rare case where the complement is dead across the reload;
+  // otherwise a plain partial redef would read lanes with no reaching def.
+  if (SubRegIdx != 0) {
+    LaneBitmask Complement =
+        MRI->getMaxLaneMaskForVReg(OrigVReg) & ~SpilledVMP.getLaneMask();
+    SlotIndex RSlot = LIS->getInstructionIndex(*ReloadMI).getRegSlot();
+    const LiveInterval &LI = LIS->getInterval(OrigVReg);
+    bool ComplementLive = false;
+    if (LI.hasSubRanges()) {
+      for (const LiveInterval::SubRange &S : LI.subranges())
+        if ((S.LaneMask & Complement).any() && S.liveAt(RSlot))
+          ComplementLive = true;
+    } else if (Complement.any() && LI.liveAt(RSlot))
+      ComplementLive = true;
+    ReloadMI->getOperand(0).setIsUndef(!ComplementLive);
+  }
+
   SSAInvalidated =
       true; // redef of OrigVReg breaks SSA; inline repair restores it
 
