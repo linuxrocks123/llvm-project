@@ -85,16 +85,17 @@ Register MachineLaneSSAUpdater::repairSSAForNewDef(
     }
   }
 
-  // Step 1: Find the def operand for OrigVReg
+  // Step 1: Find the def operand for OrigVReg. Iterate ALL operands filtered by
+  // the isDef flag rather than NewDefMI.defs(): the range helper returns only
+  // the leading explicit defs ([0, getNumExplicitDefs())), which is empty for
+  // variadic instructions like INLINEASM -- their def operands sit after the asm
+  // string and flag immediates, so defs() misses the def of OrigVReg entirely.
   MachineOperand *DefOp = nullptr;
-  unsigned DefOpIdx = 0;
-
-  for (MachineOperand &MO : NewDefMI.defs()) {
-    if (MO.getReg() == OrigVReg) {
+  for (MachineOperand &MO : NewDefMI.operands()) {
+    if (MO.isReg() && MO.isDef() && MO.getReg() == OrigVReg) {
       DefOp = &MO;
       break;
     }
-    ++DefOpIdx;
   }
 
   assert(DefOp && "NewDefMI should have a def operand for OrigVReg");
