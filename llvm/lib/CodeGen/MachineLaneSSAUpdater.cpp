@@ -817,9 +817,13 @@ Register MachineLaneSSAUpdater::buildRSForSuperUse(
         LanesToExtend.push_back(CovLanes);
     };
 
-    // Emit covering subregisters so a non-contiguous group (e.g. sub0+sub1+sub3)
-    // is split into valid subregister sources.
-    if (getSubRegIndexForLaneMask(PieceLanes, &TRI))
+    // Emit covering subregisters so a group without a single class-supported
+    // index -- non-contiguous (e.g. sub0+sub1+sub3) or an unaligned slice the
+    // class has no index for (e.g. sub10_..._sub15 of an sgpr_512) -- is split
+    // into valid, class-supported subregister sources.
+    unsigned DirectIdx = getSubRegIndexForLaneMask(PieceLanes, &TRI);
+    if (DirectIdx &&
+        TRI.getSubClassWithSubReg(MRI.getRegClass(OldVR), DirectIdx))
       EmitCover(PieceLanes);
     else
       for (unsigned CoverSubIdx : getCoveringSubRegsForLaneMask(
@@ -827,8 +831,33 @@ Register MachineLaneSSAUpdater::buildRSForSuperUse(
         EmitCover(TRI.getSubRegIndexLaneMask(CoverSubIdx));
   };
 
+  // Restrict the reaching query to OrigVReg lanes that have a REAL establishing
+  // definition. When a value is placed in an oversized register class (e.g. a
+  // 320-bit value held in an sgpr_512), LiveIntervalCalc fabricates a subrange
+  // over the never-defined padding lanes whose only values are undef (printed
+  // @x, i.e. VNInfo::isUnused) inputs joined into a PHI-def. Querying such a
+  // subrange returns that PHI-def VNInfo, which has no renamed/real def to
+  // resolve to, so the padding lanes would be emitted as a live OrigVReg
+  // placeholder that is never patched -> dangling use + illegal subregister
+  // index. Excluding them routes the padding lanes to the undef NoSub piece.
+  LaneBitmask RealDef = LaneBitmask::getNone();
+  {
+    auto HasRealDef = [](const LiveRange &LR) {
+      for (const VNInfo *V : LR.valnos)
+        if (V && !V->isUnused() && !V->isPHIDef())
+          return true;
+      return false;
+    };
+    if (FrozenOrigLI->hasSubRanges()) {
+      for (const LiveInterval::SubRange &S : FrozenOrigLI->subranges())
+        if (HasRealDef(S))
+          RealDef |= S.LaneMask;
+    } else if (HasRealDef(*FrozenOrigLI))
+      RealDef = MRI.getMaxLaneMaskForVReg(OldVR);
+  }
+
   SmallVector<std::pair<LaneBitmask, VNInfo *>, 4> OldPieces;
-  collectReachingVNIs(*FrozenOrigLI, LanesFromOld, QueryIdx, OldPieces);
+  collectReachingVNIs(*FrozenOrigLI, LanesFromOld & RealDef, QueryIdx, OldPieces);
   // collectReachingVNIs only covers lanes that have a subrange; any remaining
   // old lanes have no establishing def and are undef here.
   LaneBitmask Covered = LaneBitmask::getNone();
