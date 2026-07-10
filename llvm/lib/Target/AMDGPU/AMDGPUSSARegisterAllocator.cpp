@@ -256,7 +256,14 @@ void AMDGPUSSARegisterAllocator::color() {
           IsClobberSite = true;
         } else if (MO.isReg() && MO.isDef() && MO.isImplicit() &&
                    MO.getReg().isPhysical() &&
-                   !MRI->isReserved(MO.getReg().asMCReg())) {
+                   MRI->isAllocatable(MO.getReg().asMCReg())) {
+          // Only an implicit def of an ALLOCATABLE physreg matters: a value
+          // live across it could be colored onto that reg and would be
+          // clobbered (e.g. an inline-asm register clobber). Non-allocatable
+          // implicit defs -- notably implicit-def $scc/$vcc on ordinary ALU ops
+          // (S_CMP, S_ADD, ...) -- can never hold an allocated vreg, so tracking
+          // them only bloats CallSites and slows pickFreePhysReg's O(sites) scan
+          // without ever changing a decision.
           IsClobberSite = true;
         }
       }
