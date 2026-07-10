@@ -408,7 +408,17 @@ void MachineLaneSSAUpdater::rewriteUseReaching(
     MachineBasicBlock *Pred = UseMI->getOperand(OpIdx + 1).getMBB();
     UsePt = LIS.getMBBEndIdx(Pred);
   } else {
-    UsePt = LIS.getInstructionIndex(*UseMI).getRegSlot();
+    // A tied use is read before the instruction's own def executes. For an
+    // early-clobber two-address def (e.g. V_WMMA_*_twoaddr accumulator), that
+    // def's VNInfo sits at getRegSlot(EC=true), i.e. at/adjacent to the plain
+    // reg slot; querying the reaching value there resolves to the instruction's
+    // OWN def instead of the incoming value, so the tied use is never rewritten
+    // and is left reading the now-renamed OrigVReg ("Reading virtual register
+    // without a def"). The base index precedes every def slot, so it yields the
+    // incoming value. Non-tied uses are unaffected (no def of OrigVReg on the
+    // use instruction to collide with).
+    SlotIndex Idx = LIS.getInstructionIndex(*UseMI);
+    UsePt = MO.isTied() ? Idx.getBaseIndex() : Idx.getRegSlot();
   }
 
   // Lanes (within MaskToRewrite) whose reaching value at the use IS this def.
