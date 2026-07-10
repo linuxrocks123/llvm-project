@@ -514,8 +514,13 @@ void MachineLaneSSAUpdater::rewriteDominatedUses(Register OrigVReg,
        llvm::make_early_inc_range(MRI.use_operands(OrigVReg))) {
     MachineInstr *UseMI = MO.getParent();
 
-    // Skip the definition instruction itself
-    if (UseMI == DefMI)
+    // Skip the defining instruction itself -- its reads are the OLD value
+    // (e.g. a read-modify-write redef "%new = OP %orig"). A PHI is the sole
+    // exception: its incoming operands live on distinct edges and one may be a
+    // legal loop self-reference to the PHI's own result (the back-edge lane).
+    // Let those flow into rewriteUseReaching, which only claims lanes whose
+    // reaching VNInfo is this PHI-def, so non-self operands are left untouched.
+    if (UseMI == DefMI && !DefMI->isPHI())
       continue;
 
     // Get the lane mask for this operand
