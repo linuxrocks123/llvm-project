@@ -387,11 +387,27 @@ void AMDGPUSSARegisterAllocator::color() {
 
           MCRegister Chosen;
           unsigned UseOpIdx;
-          if (MI.isRegTiedToUseOperand(MO.getOperandNo(), &UseOpIdx)) {
-            Chosen = ColorMap.lookup(MI.getOperand(UseOpIdx).getReg());
-            assert(Chosen && "Tied use must be colored already");
+          bool IsTied = MI.isRegTiedToUseOperand(MO.getOperandNo(), &UseOpIdx);
+          if (IsTied &&
+              (Chosen = ColorMap.lookup(MI.getOperand(UseOpIdx).getReg()))) {
+            // Ordinary two-address def: inherit the tied use's color.
             LLVM_DEBUG(dbgs() << "    tied: " << printReg(Reg, TRI)
                               << " inherits " << TRI->getName(Chosen) << "\n");
+          } else if (IsTied && MI.getOperand(UseOpIdx).isUndef()) {
+            // The tied use is an `undef` passthrough (the DPP "old" source
+            // `%N = V_..._dpp undef %N, ...`, a D16 load's untouched half, or a
+            // MIX partial def). Its value is a don't-care, so there is no
+            // earlier color to inherit -- color the def like a normal def.
+            // rewriteOperands() then assigns the same physreg to the self-tied
+            // use (same vreg), preserving two-address form.
+            Chosen = pickFreePhysReg(MRI->getRegClass(Reg),
+                                     LIS->getInterval(Reg), WiderDefs);
+            assert(Chosen && "Failed to find free physreg");
+            LLVM_DEBUG(dbgs() << "    color (undef self-tie): "
+                              << printReg(Reg, TRI) << " -> "
+                              << TRI->getName(Chosen) << "\n");
+          } else if (IsTied) {
+            llvm_unreachable("Tied use must be colored already or undef");
           } else {
             Chosen = pickFreePhysReg(MRI->getRegClass(Reg),
                                      LIS->getInterval(Reg), WiderDefs);
