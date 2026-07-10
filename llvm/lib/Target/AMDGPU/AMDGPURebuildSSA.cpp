@@ -121,33 +121,19 @@ bool AMDGPURebuildSSALegacy::runOnMachineFunction(MachineFunction &MF) {
         // A wide vreg can be assembled by a chain of partial subregister defs
         // where every def after the first read-modify-writes the super-register
         // (a subreg def without `undef` implicitly reads the lanes it does not
-        // write). Such re-defs depend on earlier defs, so later defs must be
-        // renamed before earlier ones (Root, the establishing def, stays last),
-        // otherwise recomputing OrigVReg's interval mid-chain reads lanes whose
-        // def was just renamed away.
-        //
-        // This reverse-order handling is only safe for an RMW chain confined to
-        // ONE block (a dominance chain by slot; never loop-carried, where a
-        // back-edge read is not from a dominator). Multi-block/loop vregs keep
-        // the original handling.
-        const MachineBasicBlock *DefBlock = nullptr;
-        bool SingleBlock = true;
-        for (const MachineOperand &MO : MRI->def_operands(VReg)) {
-          const MachineBasicBlock *B = MO.getParent()->getParent();
-          if (!DefBlock)
-            DefBlock = B;
-          else if (DefBlock != B) {
-            SingleBlock = false;
+        // write). Such a re-def must be renamed before the establishing def it
+        // reads, otherwise recomputing OrigVReg's interval mid-chain reads lanes
+        // whose def was just renamed away. This ordering constraint is
+        // INTRA-block (a dominance chain by slot, no back-edges), so it is safe
+        // even when the vreg also has defs in other blocks or loops -- it is
+        // applied per block in the WorkList sort below (not as a global
+        // reverse), and the establishing def is kept as Root (processed last).
+        bool HasRMWRedef = false;
+        for (const MachineOperand &MO : MRI->def_operands(VReg))
+          if (MO.getSubReg() && !MO.isUndef()) {
+            HasRMWRedef = true;
             break;
           }
-        }
-        bool HasRMWRedef = false;
-        if (SingleBlock)
-          for (const MachineOperand &MO : MRI->def_operands(VReg))
-            if (MO.getSubReg() && !MO.isUndef()) {
-              HasRMWRedef = true;
-              break;
-            }
 
         // Find the establishing (earliest) non-PHI definition. This is the
         // unique original SSA def that anchors the vreg. For an RMW chain the
@@ -176,15 +162,16 @@ bool AMDGPURebuildSSALegacy::runOnMachineFunction(MachineFunction &MF) {
           if (V && !V->isUnused() && !V->isPHIDef() && V != Root)
             WorkList.push_back(V);
         llvm::sort(WorkList, [&](VNInfo *A, VNInfo *B) {
-          // Single-block RMW chains: rename later defs first (descending) so a
-          // rename never strips lanes an earlier, still-present RMW def reads.
-          if (HasRMWRedef)
+          // Same-block RMW chain: rename later (RMW-reader) defs before the
+          // earlier establishing def they read -- IsEarlier(B, A) reverses the
+          // slot order (block equal here). Renaming the establisher first would
+          // strip a lane the reader still needs. Intra-block only, so
+          // dominance-safe (no back-edges) even for multi-block/loop vregs.
+          // Otherwise: dominator-preorder, then slot.
+          if (HasRMWRedef &&
+              LIS->getMBBFromIndex(A->def) == LIS->getMBBFromIndex(B->def))
             return IsEarlier(B, A);
-          MachineBasicBlock *BBA = LIS->getMBBFromIndex(A->def);
-          MachineBasicBlock *BBB = LIS->getMBBFromIndex(B->def);
-          if (DomPreorder[BBA] != DomPreorder[BBB])
-            return DomPreorder[BBA] < DomPreorder[BBB];
-          return A->def < B->def;
+          return IsEarlier(A, B);
         });
         WorkList.push_back(Root);
         // LI not used below this point.
