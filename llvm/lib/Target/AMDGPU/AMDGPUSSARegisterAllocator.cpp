@@ -524,6 +524,20 @@ void AMDGPUSSARegisterAllocator::emitSwap(MachineBasicBlock &MBB,
   }
 
   // VGPR: only 32-bit swap primitives exist; decompose wider tuples.
+  // 16-bit true16 lanes (e.g. two f16 PHI values packed into one VGPR's
+  // lo16/hi16) cannot use V_SWAP_B32 -- its operands are VGPR_32. Use the
+  // 16-bit swap (V_SWAP_B16, present on every true16 target, which is the only
+  // place 16-bit VGPR subregs are allocated), or a 16-bit XOR triplet fallback.
+  if (RegWidth == 16) {
+    if (ST->hasTrue16BitInsts())
+      BuildMI(MBB, InsertPt, DebugLoc(), TII->get(AMDGPU::V_SWAP_B16), RegA)
+          .addDef(RegB)
+          .addReg(RegB)
+          .addReg(RegA);
+    else
+      EmitXorTriplet(AMDGPU::V_XOR_B16_fake16_e64);
+    return;
+  }
   if (RegWidth <= 32) {
     if (ST->hasSwap())
       BuildMI(MBB, InsertPt, DebugLoc(), TII->get(AMDGPU::V_SWAP_B32), RegA)
