@@ -372,11 +372,16 @@ MachineOperand *MachineLaneSSAUpdater::createPHIInBlockReaching(
           (RLane == RFull) ? 0 : getSubRegIndexForLaneMask(RLane, &TRI);
       PHINode.addReg(RD->VReg, 0, Sub);
     } else {
-      // Placeholder: Root value (final) or a not-yet-materialized value patched
-      // later by its owner's rewriteDominatedUses.
+      // No renamed reaching def on this edge. Two cases:
+      //  * V == null: the lane has no reaching def here (undef on this edge,
+      //    e.g. a predecessor that establishes only the other lanes). Source it
+      //    with the undef flag; a plain read would be "PHI operand is not
+      //    live-out from predecessor".
+      //  * V != null: a Root/final or not-yet-renamed value -> keep an OrigVReg
+      //    placeholder (final, or patched later by its owner's rewrite).
       unsigned Sub =
           (Lane == FullMask) ? 0 : getSubRegIndexForLaneMask(Lane, &TRI);
-      PHINode.addReg(OrigVReg, 0, Sub);
+      PHINode.addReg(OrigVReg, V ? 0 : RegState::Undef, Sub);
     }
     PHINode.addMBB(Pred);
   }

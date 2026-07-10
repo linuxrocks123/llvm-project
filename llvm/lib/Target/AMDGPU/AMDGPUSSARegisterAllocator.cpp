@@ -710,15 +710,26 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
         MBB.addLiveIn(DstPhys);
 
       for (unsigned I = 1, E = MI.getNumOperands(); I < E; I += 2) {
-        Register SrcVReg = MI.getOperand(I).getReg();
+        MachineOperand &SrcMO = MI.getOperand(I);
         MachineBasicBlock *Pred = MI.getOperand(I + 1).getMBB();
-        MCRegister SrcPhys = ColorMap.lookup(SrcVReg);
+
+        // An undef incoming value needs no copy, but DstPhys must still be
+        // defined so it is live-out of Pred (DstPhys is a live-in of MBB).
+        // Encode it as a copy with a null source; it is emitted as an
+        // IMPLICIT_DEF of DstPhys during copy insertion below (as generic
+        // PHIElimination does for undef PHI operands).
+        if (SrcMO.isUndef()) {
+          PredCopies[Pred].push_back({MCRegister(), DstPhys});
+          continue;
+        }
+
+        MCRegister SrcPhys = ColorMap.lookup(SrcMO.getReg());
         assert(SrcPhys && "PHI source not colored");
 
         // A PHI source may name a subregister (e.g. %x.sub0). The copy must
         // move the corresponding sub-physreg, not the full tuple, otherwise we
         // emit an illegal width-mismatched copy.
-        if (unsigned SubIdx = MI.getOperand(I).getSubReg()) {
+        if (unsigned SubIdx = SrcMO.getSubReg()) {
           SrcPhys = TRI->getSubReg(SrcPhys, SubIdx);
           assert(SrcPhys && "Invalid subreg index on PHI source");
         }
@@ -733,6 +744,8 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
 
     for (auto &[Pred, Copies] : PredCopies) {
       MachineBasicBlock *InsertMBB = Pred;
+      // The split decision covers null-source (IMPLICIT_DEF) entries too:
+      // edgeCopiesNeedSplit only inspects the destination of each pair.
       if (edgeCopiesNeedSplit(Pred, &MBB, Copies)) {
         LLVM_DEBUG(dbgs() << "  Splitting critical edge "
                           << printMBBReference(*Pred) << " -> "
@@ -744,6 +757,17 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
       LLVM_DEBUG(dbgs() << "  Edge " << printMBBReference(*InsertMBB) << " -> "
                         << printMBBReference(MBB) << ":\n");
       auto InsertPt = InsertMBB->getFirstTerminator();
+      // Materialize undef edges (null source) as IMPLICIT_DEF of DstPhys and
+      // drop them; the remainder are real copies handed to resolvePermutation.
+      for (auto *It = Copies.begin(); It != Copies.end();) {
+        if (!It->first) {
+          BuildMI(*InsertMBB, InsertPt, DebugLoc(),
+                  TII->get(TargetOpcode::IMPLICIT_DEF), It->second);
+          It = Copies.erase(It);
+        } else {
+          ++It;
+        }
+      }
       resolvePermutation(*InsertMBB, InsertPt, Copies);
     }
   }
