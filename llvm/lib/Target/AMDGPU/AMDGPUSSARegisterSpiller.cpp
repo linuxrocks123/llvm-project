@@ -1441,7 +1441,12 @@ MachineInstr *AMDGPUSSARegisterSpiller::spillAtDefinition(VRegMaskPair VMP) {
   }
 
   MachineBasicBlock *DefMBB = DefMI->getParent();
-  MachineBasicBlock::iterator InsertAfter = std::next(DefMI->getIterator());
+  // Store right after the def. When the def is a PHI, all PHIs must stay
+  // contiguous at the block top, so std::next(PHI) could land the store between
+  // PHIs ("PHI after non-PHI"). Insert after the last PHI instead.
+  MachineBasicBlock::iterator InsertAfter =
+      DefMI->isPHI() ? DefMBB->getFirstNonPHI()
+                     : std::next(DefMI->getIterator());
 
   // Get or create stack slot
   int FI = assignVirt2StackSlot(VMP);
