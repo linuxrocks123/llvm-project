@@ -388,9 +388,19 @@ void AMDGPUSSARegisterAllocator::color() {
           MCRegister Chosen;
           unsigned UseOpIdx;
           bool IsTied = MI.isRegTiedToUseOperand(MO.getOperandNo(), &UseOpIdx);
+          MCRegister TiedUseColor;
           if (IsTied &&
-              (Chosen = ColorMap.lookup(MI.getOperand(UseOpIdx).getReg()))) {
-            // Ordinary two-address def: inherit the tied use's color.
+              (TiedUseColor = ColorMap.lookup(MI.getOperand(UseOpIdx).getReg()))) {
+            // Ordinary two-address def: inherit the tied use's color. When the
+            // tied use reads a sub-register (e.g. a 32-bit V_MOV_B32_dpp or
+            // V_WRITELANE_B32 tied to one lane of a wider value), the def's
+            // class matches that lane, so inherit the sub-register of the color,
+            // not the whole super-register.
+            Chosen = TiedUseColor;
+            if (unsigned UseSubIdx = MI.getOperand(UseOpIdx).getSubReg()) {
+              Chosen = TRI->getSubReg(TiedUseColor, UseSubIdx);
+              assert(Chosen && "Invalid tied-use subreg index");
+            }
             LLVM_DEBUG(dbgs() << "    tied: " << printReg(Reg, TRI)
                               << " inherits " << TRI->getName(Chosen) << "\n");
           } else if (IsTied && MI.getOperand(UseOpIdx).isUndef()) {
