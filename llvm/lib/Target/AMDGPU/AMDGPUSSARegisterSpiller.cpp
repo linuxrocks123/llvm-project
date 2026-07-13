@@ -263,29 +263,31 @@ bool AMDGPUSSARegisterSpiller::processFunction(MachineFunction &MF,
             !(IsVGPRPass ? TRI->isVGPRClass(RC) : TRI->isSGPRClass(RC)))
           continue;
         unsigned Width = TRI->getRegSizeInBits(*RC) / 32;
-        if (MO.isUse()) {
-          if (Width == 1) {
+        // A physreg use frees pressure only for the 32-bit slots it kills. An
+        // `undef` use reads no live value and was never added to LivePhysRP, so
+        // it must not decrement it -- otherwise the unsigned counter underflows
+        // (e.g. SI_RETURN_TO_EPILOG's `implicit undef $vgprN` operands), which
+        // fabricates enormous pressure and forces a spurious spill.
+        if (MO.isUse() && !MO.isUndef()) {
+          // Pressure is counted in 32-bit slots. A single 32-bit register spans
+          // several reg units (its 16-bit sub-lanes); a wider tuple is split
+          // into its dword sub-registers. Either way, a slot is dead only if all
+          // of its units are dead, and each dead slot frees one unit of pressure.
+          SmallVector<MCRegister, 8> Slots;
+          if (Width == 1)
+            Slots.push_back(Reg);
+          else
+            for (int16_t SubIdx : TRI->getRegSplitParts(RC, /*DWordBytes=*/4))
+              Slots.push_back(TRI->getSubReg(Reg, SubIdx));
+          for (MCRegister Slot : Slots) {
             bool Dead = true;
-            for (MCRegUnit Unit : TRI->regunits(Reg))
+            for (MCRegUnit Unit : TRI->regunits(Slot))
               if (LIS->getRegUnit(Unit).liveAt(NextSI)) {
                 Dead = false;
                 break;
               }
             if (Dead)
               --LivePhysRP;
-          } else {
-            const unsigned DWordBytes = 4;
-            for (int16_t SubIdx : TRI->getRegSplitParts(RC, DWordBytes)) {
-              MCRegister Sub = TRI->getSubReg(Reg, SubIdx);
-              bool Dead = true;
-              for (MCRegUnit Unit : TRI->regunits(Sub))
-                if (LIS->getRegUnit(Unit).liveAt(NextSI)) {
-                  Dead = false;
-                  break;
-                }
-              if (Dead)
-                --LivePhysRP;
-            }
           }
         }
         if (MO.isDef())
