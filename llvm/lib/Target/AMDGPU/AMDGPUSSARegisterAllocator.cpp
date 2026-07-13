@@ -831,7 +831,11 @@ void AMDGPUSSARegisterAllocator::rewriteOperands(MachineFunction &MF) {
   LLVM_DEBUG(dbgs() << "\n=== Operand Rewrite ===\n");
 
   for (MachineBasicBlock &MBB : MF) {
-    for (MachineInstr &MI : MBB) {
+    // Use instrs() so operands of instructions *inside* BUNDLEs are rewritten
+    // too (e.g. GWS ops: `BUNDLE implicit %r { DS_GWS_INIT %r, ... }`). Plain
+    // MBB iteration visits only bundle headers, leaving the bundled
+    // instruction's virtual operands un-rewritten ("Remaining virtual register").
+    for (MachineInstr &MI : MBB.instrs()) {
       for (MachineOperand &MO : MI.operands()) {
         if (!MO.isReg() || !MO.getReg().isVirtual())
           continue;
