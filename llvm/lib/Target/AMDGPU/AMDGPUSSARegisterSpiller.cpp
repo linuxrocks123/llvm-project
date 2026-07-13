@@ -1762,6 +1762,15 @@ bool AMDGPUSSARegisterSpiller::runOnMachineFunction(MachineFunction &MF) {
 
   SSAInvalidated = false;
 
+  // Stack slots and the store-at-definition memo are per-function state keyed by
+  // VRegMaskPair. Virtual register numbers restart in every function, so a stale
+  // entry from a previously-processed function would alias a different value:
+  // Virt2StackSlotMap would return a frame index that is out of range for this
+  // function's MachineFrameInfo (getObjectAlign "Invalid Object Idx"), and
+  // StoredAtDefinition would hand back a dangling store from the prior function.
+  Virt2StackSlotMap.clear();
+  StoredAtDefinition.clear();
+
   LLVM_DEBUG(dbgs() << "AMDGPUSSARegisterSpiller: Processing function "
                     << MF.getName() << "\n");
 
