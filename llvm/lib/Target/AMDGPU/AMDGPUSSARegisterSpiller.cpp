@@ -51,70 +51,21 @@ static cl::opt<cl::boolOrDefault> VerifyFinalRP(
 // Helper function to identify spill instructions
 // ============================================================================
 
+// A spill store emitted by storeRegToStackSlot. Classify via the Spill TSFlag
+// plus mayStore rather than enumerating opcodes: this covers every register
+// file (SGPR, VGPR, AGPR, and the AGPR-or-VGPR "AV" classes used on gfx90a+)
+// and every register width without an opcode list that silently omits some.
 static bool isSpillInstr(const MachineInstr *MI) {
-  if (MI->getOpcode() == AMDGPU::SI_SPILL_S32_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S64_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S96_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S128_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S160_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S192_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S224_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S256_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S288_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S320_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S352_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S384_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S512_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S1024_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V32_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V64_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V96_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V128_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V160_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V192_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V224_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V256_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V288_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V320_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V352_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V384_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V512_SAVE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V1024_SAVE)
-    return true;
-  return false;
+  return SIInstrInfo::isSpill(MI->getDesc()) && MI->mayStore();
 }
 
+// A reload emitted by loadRegFromStackSlot. See isSpillInstr: classify via the
+// Spill TSFlag plus mayLoad so AGPR and AGPR-or-VGPR ("AV") reloads are
+// recognized too. The prior opcode list omitted the A/AV variants, so on
+// gfx90a+ an AV reload redef was never renamed during SSA repair, leaving the
+// spilled vreg multi-defined and tripping getVRegDef on the next spill.
 static bool isReloadInstr(const MachineInstr *MI) {
-  if (MI->getOpcode() == AMDGPU::SI_SPILL_S32_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S64_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S96_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S128_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S160_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S192_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S224_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S256_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S288_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S320_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S352_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S384_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S512_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_S1024_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V32_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V64_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V96_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V128_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V160_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V192_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V224_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V256_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V288_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V320_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V352_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V384_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V512_RESTORE ||
-      MI->getOpcode() == AMDGPU::SI_SPILL_V1024_RESTORE)
-    return true;
-  return false;
+  return SIInstrInfo::isSpill(MI->getDesc()) && MI->mayLoad();
 }
 
 char AMDGPUSSARegisterSpiller::ID = 0;
