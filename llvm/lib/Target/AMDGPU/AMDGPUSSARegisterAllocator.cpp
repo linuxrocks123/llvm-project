@@ -417,7 +417,16 @@ void AMDGPUSSARegisterAllocator::color() {
           }
 
           ColorMap[Reg] = Chosen;
-          markOccupied(Chosen);
+          // A dead def (e.g. the unused carry-out of V_ADD_CO_U32_e64) is not
+          // live past this instruction, so it must not reserve a register going
+          // forward. Marking it occupied would leak: the kill path only frees
+          // dying uses, never dead defs, so they accumulate until the class is
+          // exhausted ("Failed to find free physreg"). It still needs a valid,
+          // non-conflicting physreg (pickFreePhysReg above picked one free at
+          // this point) and still counts toward the high-water mark below, but
+          // is never added to OccupiedRegUnits.
+          if (!MO.isDead())
+            markOccupied(Chosen);
 
           unsigned Idx = TRI->getHWRegIndex(Chosen);
           unsigned W = TRI->getRegSizeInBits(*MRI->getRegClass(Reg)) / 32;
