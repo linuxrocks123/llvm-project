@@ -179,6 +179,15 @@ private:
   // duplicate when several defs share an IDF block. Reset per session.
   DenseMap<std::pair<MachineBasicBlock *, LaneBitmask>, Register> LanePHIs;
 
+  // Within one OrigVReg session, share a super-use REG_SEQUENCE across multiple
+  // operands of the SAME non-PHI instruction that read the same OrigVReg lanes.
+  // Without this, an instruction reading a value in two operands (e.g.
+  // V_MAX_F64 x, x or V_DIV_SCALE_F64 %v, %v) would get a distinct composed
+  // vreg per operand, presenting two different registers to a constant-bus- or
+  // src0==src1-constrained instruction. Keyed by (use instr, operand lane
+  // mask); reset per session.
+  DenseMap<std::pair<MachineInstr *, LaneBitmask>, Register> SuperUseRSCache;
+
   // Reaching-def oracle (sound successor to dominance+order for lane
   // decisions). collectReachingVNIs: decompose \p Mask by OrigVReg's (old,
   // still-valid) LiveInterval subranges and append, for each covered piece,

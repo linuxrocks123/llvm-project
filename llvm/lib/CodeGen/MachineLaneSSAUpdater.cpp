@@ -65,6 +65,7 @@ Register MachineLaneSSAUpdater::repairSSAForNewDef(
     RenameSessionOrig = OrigVReg;
     DefInstrToRenamed.clear();
     LanePHIs.clear();
+    SuperUseRSCache.clear();
 
     // Freeze a deep copy of OrigVReg's original LiveInterval as the
     // reaching-def oracle for this session. Must be taken BEFORE any def is
@@ -473,6 +474,22 @@ void MachineLaneSSAUpdater::rewriteUseReaching(
     return;
   }
 
+  // Multiple operands of the same non-PHI instruction that read the same
+  // OrigVReg lanes must resolve to ONE composed value, not a distinct
+  // REG_SEQUENCE per operand -- otherwise a constant-bus- or src0==src1-
+  // constrained instruction (e.g. V_MAX_F64 x, x, V_DIV_SCALE_F64 %v, %v) sees
+  // two different registers. Reuse the super-use REG_SEQUENCE built for the
+  // first such operand this session. PHIs are excluded: their operands read on
+  // distinct edges, so a shared key would wrongly conflate different values.
+  const bool ShareRS = !UseMI->isPHI();
+  auto RSKey = std::make_pair(UseMI, OpMask);
+  if (ShareRS)
+    if (Register Cached = SuperUseRSCache.lookup(RSKey)) {
+      MO.setReg(Cached);
+      MO.setSubReg(0);
+      return;
+    }
+
   // Partial: compose Owned lanes from NewSSA; the remaining lanes stay OrigVReg
   // (Root/final or a placeholder patched by their owner). The REG_SEQUENCE
   // result is a fresh whole register that only needs to hold OpMask-many lanes.
@@ -493,6 +510,8 @@ void MachineLaneSSAUpdater::rewriteUseReaching(
   SlotIndex RSIdx;
   Register RSReg = buildRSForSuperUse(UseMI, MO, OrigVReg, NewSSA, Owned,
                                       OrigLI, UseRC, RSIdx, LanesToExtend);
+  if (ShareRS)
+    SuperUseRSCache[RSKey] = RSReg;
   extendAt(OrigLI, RSIdx, LanesToExtend);
   MO.setReg(RSReg);
   MO.setSubReg(0);
