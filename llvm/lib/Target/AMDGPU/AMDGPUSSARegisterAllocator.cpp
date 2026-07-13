@@ -845,6 +845,21 @@ void AMDGPUSSARegisterAllocator::rewriteOperands(MachineFunction &MF) {
           // `undef` flag is preserved by setReg, so the verifier permits the
           // read of an otherwise-undefined physreg.
           assert(MO.isUndef() && "non-undef virtual register not colored");
+          unsigned DefOpIdx;
+          if (MO.isUse() &&
+              MI.isRegTiedToDefOperand(MO.getOperandNo(), &DefOpIdx)) {
+            // An undef use tied to a def (e.g. the DPP/PERMLANE "old" source
+            // read as `undef %N.subX` where %N is never otherwise defined) has
+            // a don't-care value, but two-address form still requires it to
+            // equal the def. The def operand precedes this use and is already
+            // rewritten to its physreg, which is the correct width for the tied
+            // slot, so copy it verbatim and drop any sub-register.
+            MCRegister DefPhys = MI.getOperand(DefOpIdx).getReg();
+            assert(DefPhys.isPhysical() && "tied def not yet rewritten");
+            MO.setSubReg(0);
+            MO.setReg(DefPhys);
+            continue;
+          }
           const TargetRegisterClass *RC = MRI->getRegClass(VReg);
           ArrayRef<MCPhysReg> Order = RegClassInfo.getOrder(RC);
           assert(!Order.empty() && "empty allocation order for undef operand");
