@@ -1792,6 +1792,20 @@ bool AMDGPUSSARegisterSpiller::runOnMachineFunction(MachineFunction &MF) {
   unsigned VGPRLimit = ST.getMaxNumVGPRs(MF);
   unsigned SGPRLimit = ST.getMaxNumSGPRs(MF);
 
+  // Cap each budget by the number of registers the *allocator* can actually
+  // hand out for that class -- the size of its allocatable set (getOrder in
+  // color()). getMaxNumVGPRs returns the occupancy/addressable target over the
+  // whole vector register budget, which on split-file targets (gfx90a: separate
+  // VGPR and AGPR files) exceeds the VGPR_32 file the allocator draws from: a
+  // VGPR value cannot be colored to an AGPR. If the spiller trusts the larger
+  // number it under-spills, leaving true pressure above what color() can place,
+  // and color() then aborts ("Failed to find free physreg"). Taking the min
+  // keeps the spiller's target consistent with the allocator's real capacity.
+  VGPRLimit = std::min(
+      VGPRLimit, TRI->getAllocatableSet(MF, &AMDGPU::VGPR_32RegClass).count());
+  SGPRLimit = std::min(
+      SGPRLimit, TRI->getAllocatableSet(MF, &AMDGPU::SGPR_32RegClass).count());
+
   // Reserve a ~10% safety margin (RA temporaries, compiler temporaries, ABI
   // reserved registers). Subtract floor(10%) rather than computing (N*9)/10:
   // the latter truncates the *limit* down, which rounds the *margin up* and
