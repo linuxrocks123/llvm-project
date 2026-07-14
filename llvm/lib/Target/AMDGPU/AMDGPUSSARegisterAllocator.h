@@ -24,6 +24,7 @@
 #include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/Register.h"
 #include "llvm/CodeGen/RegisterClassInfo.h"
 #include "llvm/CodeGen/SlotIndexes.h"
@@ -41,6 +42,7 @@ class AMDGPUSSARegisterAllocator : public MachineFunctionPass {
   MachineRegisterInfo *MRI = nullptr;
   MachineDominatorTree *MDT = nullptr;
   LiveIntervals *LIS = nullptr;
+  MachineLoopInfo *MLI = nullptr;
   const GCNSubtarget *ST = nullptr;
   RegisterClassInfo RegClassInfo;
 
@@ -101,6 +103,8 @@ public:
     AU.addRequired<LiveIntervalsWrapperPass>();
     AU.addRequired<SlotIndexesWrapperPass>();
     AU.addRequired<MachineDominatorTreeWrapperPass>();
+    AU.addRequired<MachineLoopInfoWrapperPass>();
+    AU.addPreserved<MachineLoopInfoWrapperPass>();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
 };

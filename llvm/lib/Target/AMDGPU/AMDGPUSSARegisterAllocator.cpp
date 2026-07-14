@@ -13,13 +13,34 @@
 #include "SIInstrInfo.h"
 #include "SIRegisterInfo.h"
 #include "llvm/ADT/DepthFirstIterator.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/LiveIntervals.h"
+#include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/InitializePasses.h"
 
 using namespace llvm;
 
 #define DEBUG_TYPE "amdgpu-ssa-register-allocator"
+
+// Step-0 PHI-copy metric (see PHI_Coalescer design section 9). Counted at the
+// copy-vs-fixed-point decision in lowerPHIs(); pure instrumentation, no MIR
+// change. It is the baseline for the fixed-point coalescer and the regression
+// guard for every later step. The two "func" counters quantify the measurement
+// domain: lowerPHIs (hence this metric and the future coalescer) is skipped for
+// functions that still carry SI control-flow pseudos at SSA destruction, so the
+// skipped/measured split is needed to know what fraction of the corpus the
+// objective can actually reach.
+#define PHI_METRIC_DEBUG_TYPE "amdgpu-phi-metric"
+STATISTIC(NumPhiOperands, "PHI operands examined at SSA destruction");
+STATISTIC(NumPhiCopies, "PHI operands lowered to a copy (not a fixed point)");
+STATISTIC(NumPhiFixedPoints, "PHI operands already fixed points (SrcPhys==DstPhys)");
+STATISTIC(NumPhiUndefEdges, "PHI operands with an undef source (no copy needed)");
+STATISTIC(NumPhiCopyWeight, "Sum of 2^loopdepth over PHI-copy operands");
+STATISTIC(NumPhiFuncsMeasured,
+          "Functions that reached SSA destruction and were measured");
+STATISTIC(NumPhiFuncsSkippedCF,
+          "Functions skipped by the metric (SI control-flow pseudos present)");
 
 char AMDGPUSSARegisterAllocator::ID = 0;
 
@@ -28,6 +49,7 @@ INITIALIZE_PASS_BEGIN(AMDGPUSSARegisterAllocator, DEBUG_TYPE,
 INITIALIZE_PASS_DEPENDENCY(LiveIntervalsWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(SlotIndexesWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(MachineDominatorTreeWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(MachineLoopInfoWrapperPass)
 INITIALIZE_PASS_END(AMDGPUSSARegisterAllocator, DEBUG_TYPE,
                     "AMDGPU SSA Register Allocator", false, false)
 
@@ -736,6 +758,13 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
 
   SmallVector<MachineInstr *, 16> PHIsToErase;
 
+  // Step-0 metric accumulators (see PHI_Coalescer design section 9). Function-
+  // local; folded into the STATISTIC counters here and printed as one per-
+  // function line under -debug-only=amdgpu-phi-metric so a diff of two llc runs
+  // is a diff of these lines.
+  unsigned FnCopies = 0, FnFixed = 0, FnUndef = 0;
+  uint64_t FnWeight = 0;
+
   for (MachineBasicBlock &MBB : MF) {
     if (MBB.empty() || !MBB.front().isPHI())
       continue;
@@ -761,6 +790,7 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
       for (unsigned I = 1, E = MI.getNumOperands(); I < E; I += 2) {
         MachineOperand &SrcMO = MI.getOperand(I);
         MachineBasicBlock *Pred = MI.getOperand(I + 1).getMBB();
+        ++NumPhiOperands;
 
         // An undef incoming value needs no copy, but DstPhys must still be
         // defined so it is live-out of Pred (DstPhys is a live-in of MBB).
@@ -769,6 +799,10 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
         // PHIElimination does for undef PHI operands).
         if (SrcMO.isUndef()) {
           PredCopies[Pred].push_back({MCRegister(), DstPhys});
+          // Undef edges emit IMPLICIT_DEF, not a copy; they are not part of the
+          // coalescer's objective, so track them separately.
+          ++NumPhiUndefEdges;
+          ++FnUndef;
           continue;
         }
 
@@ -783,8 +817,23 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
           assert(SrcPhys && "Invalid subreg index on PHI source");
         }
 
-        if (SrcPhys != DstPhys)
+        if (SrcPhys != DstPhys) {
           PredCopies[Pred].push_back({SrcPhys, DstPhys});
+          // Not a fixed point: a copy is emitted on this edge. Weight it by
+          // 2^loopdepth(Pred) so loop-carried copies dominate the cost, per the
+          // paper's cost_f (eq.1).
+          ++NumPhiCopies;
+          ++FnCopies;
+          unsigned Depth = MLI->getLoopDepth(Pred);
+          uint64_t W = Depth < 63 ? (uint64_t(1) << Depth) : ~uint64_t(0);
+          NumPhiCopyWeight += W;
+          FnWeight += W;
+        } else {
+          // SrcPhys == DstPhys: already a fixed point, no copy. This is exactly
+          // what the future coalescer manufactures.
+          ++NumPhiFixedPoints;
+          ++FnFixed;
+        }
       }
 
       PHIsToErase.push_back(&MI);
@@ -825,6 +874,14 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
     PHI->eraseFromParent();
 
   LLVM_DEBUG(dbgs() << "  Erased " << PHIsToErase.size() << " PHIs\n");
+
+  // Per-function metric line (opt-in via its own debug type, independent of the
+  // pass's verbose output): a diff of two llc runs is a diff of these lines.
+  DEBUG_WITH_TYPE(PHI_METRIC_DEBUG_TYPE,
+                  dbgs() << "phi-metric " << MF.getName()
+                         << ": copies=" << FnCopies << " fixed=" << FnFixed
+                         << " undef=" << FnUndef << " weighted=" << FnWeight
+                         << "\n");
 }
 
 void AMDGPUSSARegisterAllocator::rewriteOperands(MachineFunction &MF) {
@@ -993,9 +1050,14 @@ void AMDGPUSSARegisterAllocator::destroySSAAndRewrite(MachineFunction &MF) {
   if (hasCFPseudos(MF)) {
     LLVM_DEBUG(dbgs() << "SSA Destruction: skipped — "
                          "SI control-flow pseudos present\n");
+    // The PHI-copy metric (and the future coalescer) never sees this function;
+    // record it so the corpus baseline reports the measurable fraction, not a
+    // silent denominator.
+    ++NumPhiFuncsSkippedCF;
     return;
   }
 
+  ++NumPhiFuncsMeasured;
   lowerPHIs(MF);
   rewriteOperands(MF);
   eliminateRegSequences(MF);
@@ -1013,6 +1075,7 @@ bool AMDGPUSSARegisterAllocator::runOnMachineFunction(MachineFunction &MF) {
   ST = &MF.getSubtarget<GCNSubtarget>();
   MDT = &getAnalysis<MachineDominatorTreeWrapperPass>().getDomTree();
   LIS = &getAnalysis<LiveIntervalsWrapperPass>().getLIS();
+  MLI = &getAnalysis<MachineLoopInfoWrapperPass>().getLI();
   RegClassInfo.runOnMachineFunction(MF);
   DynVGPRBlockSize =
       ST->isDynamicVGPREnabled() ? ST->getDynamicVGPRBlockSize() : 0;
