@@ -72,7 +72,20 @@ class AMDGPUSSARegisterAllocator : public MachineFunctionPass {
   void markFree(MCRegister PhysReg);
   MCRegister pickFreePhysReg(
       const TargetRegisterClass *RC, const LiveInterval &VI,
-      ArrayRef<std::pair<MCRegister, const LiveInterval *>> WiderDefs);
+      ArrayRef<std::pair<MCRegister, const LiveInterval *>> WiderDefs,
+      ArrayRef<MCRegister> Hints = {});
+
+  // Option B affinity: collect already-colored phi-partner physregs for VReg
+  // (phi results it feeds, and -- if VReg is a phi result -- its operands),
+  // ordered by 2^loopdepth of the incoming edge (hottest first). Sub-register
+  // relationships compose both ways: a phi-result VReg reading a slice of a
+  // wider operand takes that slice of the operand's color (getSubReg); a wide
+  // VReg feeding a narrow result via VReg.subN takes the super-register whose
+  // slice is the result's color (getMatchingSuperReg -- the loop-carried tuple
+  // case). Class-compatible partners only. Returns [] when VReg touches no
+  // colored phi partner.
+  SmallVector<MCRegister, 4> collectPhiHints(Register VReg,
+                                             const TargetRegisterClass *RC);
 
   // === SSA Destruction + Operand Rewrite ===
   bool hasCFPseudos(MachineFunction &MF) const;

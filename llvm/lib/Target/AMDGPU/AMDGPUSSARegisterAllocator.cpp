@@ -84,7 +84,8 @@ void AMDGPUSSARegisterAllocator::markFree(MCRegister PhysReg) {
 
 MCRegister AMDGPUSSARegisterAllocator::pickFreePhysReg(
     const TargetRegisterClass *RC, const LiveInterval &VI,
-    ArrayRef<std::pair<MCRegister, const LiveInterval *>> WiderDefs) {
+    ArrayRef<std::pair<MCRegister, const LiveInterval *>> WiderDefs,
+    ArrayRef<MCRegister> Hints) {
   LLVM_DEBUG({
     dbgs() << "    Allocation order for " << TRI->getRegClassName(RC) << ":";
     for (MCRegister PR : RegClassInfo.getOrder(RC))
@@ -114,36 +115,128 @@ MCRegister AMDGPUSSARegisterAllocator::pickFreePhysReg(
     }
   }
 
-  for (MCRegister PR : RegClassInfo.getOrder(RC)) {
-    bool Free = true;
+  // Shared legality test: a candidate PR is usable iff none of its reg units are
+  // occupied at this def AND it is not clobbered by any call VI is live across.
+  // A value live across a call cannot occupy a register the call clobbers
+  // (regmask-clobbered caller-saved regs, or an explicit def such as the
+  // return-address $sgpr30_sgpr31) - it would be undefined after the call.
+  auto IsFree = [&](MCRegister PR) -> bool {
     for (MCRegUnit Unit : TRI->regunits(PR))
-      if (OccupiedAtDef.test(Unit)) {
-        Free = false;
+      if (OccupiedAtDef.test(Unit))
+        return false;
+    for (const auto &[CallIdx, CallMI] : CallSites) {
+      if (!VI.liveAt(CallIdx))
+        continue;
+      if (CallMI->modifiesRegister(PR, TRI))
+        return false;
+      for (const MachineOperand &MO : CallMI->operands())
+        if (MO.isRegMask() && MO.clobbersPhysReg(PR))
+          return false;
+    }
+    return true;
+  };
+
+  // Option B: prefer a phi-partner's color if it is a legal member of RC and
+  // free. Hints are pre-ordered hottest-first by collectPhiHints; take the first
+  // that fits. RC->contains guards against a partner whose class differs from RC.
+  for (MCRegister Hint : Hints) {
+    if (!Hint || !RC->contains(Hint))
+      continue;
+    if (IsFree(Hint)) {
+      LLVM_DEBUG(dbgs() << "    phi-affinity hint taken: " << TRI->getName(Hint)
+                        << "\n");
+      return Hint;
+    }
+  }
+
+  for (MCRegister PR : RegClassInfo.getOrder(RC))
+    if (IsFree(PR))
+      return PR;
+  return MCRegister();
+}
+
+// Option B affinity hint collection. See header comment.
+SmallVector<MCRegister, 4>
+AMDGPUSSARegisterAllocator::collectPhiHints(Register VReg,
+                                            const TargetRegisterClass *RC) {
+  // (physreg, weight) candidates; dedup + weight-sort before returning.
+  SmallVector<std::pair<MCRegister, uint64_t>, 4> Cand;
+
+  // Turn a colored φ partner into a candidate color for VReg. SubIdx is the
+  // sub-register index relating the two values; PartnerIsSub says which side it
+  // slices:
+  //   - PartnerIsSub == false (Direction A): VReg is the sub-register, reading
+  //     Partner.SubIdx (a lane φ reading %593.sub3 of a wide colored operand).
+  //     VReg's color is that SLICE of Partner's color -> getSubReg().
+  //   - PartnerIsSub == true  (Direction B): Partner is the sub-register; the φ
+  //     reads VReg.SubIdx into the narrow result Partner (a loop-carried tuple
+  //     whose header result is colored before the wide latch operand VReg).
+  //     VReg's color is the SUPER-register whose SubIdx slice is Partner's
+  //     color -> getMatchingSuperReg().
+  // Either composition must land in RC (VReg's class) to be a legal hint.
+  auto AddPartner = [&](Register Partner, unsigned SubIdx, bool PartnerIsSub,
+                        MachineBasicBlock *EdgeBlock) {
+    if (!Partner.isVirtual())
+      return;
+    auto It = ColorMap.find(Partner);
+    if (It == ColorMap.end())
+      return; // partner not colored yet -- nothing to align to
+    MCRegister PR = It->second;
+    if (SubIdx) {
+      PR = PartnerIsSub ? TRI->getMatchingSuperReg(PR, SubIdx, RC)
+                        : TRI->getSubReg(PR, SubIdx);
+      if (!PR)
+        return; // no such slice/super in the physreg or class
+    }
+    if (!RC->contains(PR))
+      return; // class/width mismatch after composition
+    unsigned Depth = EdgeBlock ? MLI->getLoopDepth(EdgeBlock) : 0;
+    uint64_t W = Depth < 63 ? (uint64_t(1) << Depth) : ~uint64_t(0);
+    Cand.push_back({PR, W});
+  };
+
+  MachineInstr *Def = MRI->getUniqueVRegDef(VReg);
+
+  // Direction A -- VReg is a phi result: align to its (colored) operands. If an
+  // operand reads a slice (%wide.subN), VReg's color is that slice of the
+  // operand's color (PartnerIsSub = false).
+  if (Def && Def->isPHI()) {
+    for (unsigned I = 1, E = Def->getNumOperands(); I < E; I += 2) {
+      MachineOperand &Src = Def->getOperand(I);
+      if (Src.isUndef() || !Src.isReg())
+        continue;
+      AddPartner(Src.getReg(), Src.getSubReg(), /*PartnerIsSub=*/false,
+                 Def->getOperand(I + 1).getMBB());
+    }
+  }
+
+  // Direction B -- VReg feeds one or more phi results: align to the (colored)
+  // result. The incoming edge for weighting is VReg's own def block. When the φ
+  // reads VReg via a sub-register (result is narrower than VReg -- the
+  // loop-carried tuple case, where the header result is colored before this
+  // wide latch operand), VReg's color is the super-register whose SubN slice is
+  // the result's color (PartnerIsSub = true).
+  MachineBasicBlock *DefBlock = Def ? Def->getParent() : nullptr;
+  for (MachineInstr &UseMI : MRI->use_nodbg_instructions(VReg)) {
+    if (!UseMI.isPHI())
+      continue;
+    for (unsigned I = 1, E = UseMI.getNumOperands(); I < E; I += 2) {
+      MachineOperand &Src = UseMI.getOperand(I);
+      if (Src.isReg() && Src.getReg() == VReg) {
+        AddPartner(UseMI.getOperand(0).getReg(), Src.getSubReg(),
+                   /*PartnerIsSub=*/true, DefBlock);
         break;
       }
-    // A value live across a call cannot occupy a register the call clobbers
-    // (regmask-clobbered caller-saved regs, or an explicit def such as the
-    // return-address $sgpr30_sgpr31) - it would be undefined after the call.
-    if (Free)
-      for (const auto &[CallIdx, CallMI] : CallSites) {
-        if (!VI.liveAt(CallIdx))
-          continue;
-        bool Clob = CallMI->modifiesRegister(PR, TRI);
-        if (!Clob)
-          for (const MachineOperand &MO : CallMI->operands())
-            if (MO.isRegMask() && MO.clobbersPhysReg(PR)) {
-              Clob = true;
-              break;
-            }
-        if (Clob) {
-          Free = false;
-          break;
-        }
-      }
-    if (Free)
-      return PR;
+    }
   }
-  return MCRegister();
+
+  // Hottest-first, deduped (keep max weight per physreg).
+  llvm::stable_sort(Cand, [](auto &A, auto &B) { return A.second > B.second; });
+  SmallVector<MCRegister, 4> Hints;
+  for (auto &[PR, W] : Cand)
+    if (!llvm::is_contained(Hints, PR))
+      Hints.push_back(PR);
+  return Hints;
 }
 
 void AMDGPUSSARegisterAllocator::seedOccupiedAtBBEntry(MachineBasicBlock *MBB) {
@@ -441,8 +534,10 @@ void AMDGPUSSARegisterAllocator::color() {
           } else if (IsTied) {
             llvm_unreachable("Tied use must be colored already or undef");
           } else {
+            SmallVector<MCRegister, 4> Hints =
+                collectPhiHints(Reg, MRI->getRegClass(Reg));
             Chosen = pickFreePhysReg(MRI->getRegClass(Reg),
-                                     LIS->getInterval(Reg), WiderDefs);
+                                     LIS->getInterval(Reg), WiderDefs, Hints);
             assert(Chosen && "Failed to find free physreg");
             LLVM_DEBUG(dbgs() << "    color: " << printReg(Reg, TRI) << " -> "
                               << TRI->getName(Chosen) << "\n");
