@@ -108,6 +108,10 @@ FunctionPass *createAMDGPURebuildSSALegacyPass();
 void initializeAMDGPURebuildSSALegacyPass(PassRegistry &);
 extern char &AMDGPURebuildSSALegacyID;
 
+MachineFunctionPass *createAMDGPUSimplifyUndefPHIPass();
+void initializeAMDGPUSimplifyUndefPHIPass(PassRegistry &);
+extern char &AMDGPUSimplifyUndefPHIID;
+
 MachineFunctionPass *createAMDGPUSSARegisterAllocatorPass();
 void initializeAMDGPUSSARegisterAllocatorPass(PassRegistry &);
 extern char &AMDGPUSSARegisterAllocatorID;
