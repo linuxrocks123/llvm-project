@@ -25,22 +25,25 @@ using namespace llvm;
 
 // Step-0 PHI-copy metric (see PHI_Coalescer design section 9). Counted at the
 // copy-vs-fixed-point decision in lowerPHIs(); pure instrumentation, no MIR
-// change. It is the baseline for the fixed-point coalescer and the regression
-// guard for every later step. The two "func" counters quantify the measurement
-// domain: lowerPHIs (hence this metric and the future coalescer) is skipped for
-// functions that still carry SI control-flow pseudos at SSA destruction, so the
-// skipped/measured split is needed to know what fraction of the corpus the
-// objective can actually reach.
+// change. Baseline for the coalescer and regression guard for every later step.
 #define PHI_METRIC_DEBUG_TYPE "amdgpu-phi-metric"
 STATISTIC(NumPhiOperands, "PHI operands examined at SSA destruction");
 STATISTIC(NumPhiCopies, "PHI operands lowered to a copy (not a fixed point)");
-STATISTIC(NumPhiFixedPoints, "PHI operands already fixed points (SrcPhys==DstPhys)");
+STATISTIC(NumPhiFixedPoints, "PHI operands already fixed points (Src==Dst)");
 STATISTIC(NumPhiUndefEdges, "PHI operands with an undef source (no copy needed)");
 STATISTIC(NumPhiCopyWeight, "Sum of 2^loopdepth over PHI-copy operands");
-STATISTIC(NumPhiFuncsMeasured,
-          "Functions that reached SSA destruction and were measured");
-STATISTIC(NumPhiFuncsSkippedCF,
-          "Functions skipped by the metric (SI control-flow pseudos present)");
+// Feasibility-ceiling split of the remaining copies (whole-register sources
+// only): a copy can EVER become a fixed point only if the operand does not
+// interfere with the PHI result. Infeasible copies are the ceiling residue no
+// coalescer can remove; feasible copies are what a fixed-point coalescer
+// (Option A) could still convert beyond greedy affinity (Option B).
+STATISTIC(NumPhiCopyFeasible,
+          "PHI-copy operands with no read-lane/result interference (coalescable)");
+STATISTIC(NumPhiCopyInfeasible,
+          "PHI-copy operands whose read lane interferes with the result (ceiling)");
+STATISTIC(NumPhiCopySubreg,
+          "PHI-copy operands with a sub-register source (context tally; overlaps "
+          "the feasible/infeasible split, now lane-classified)");
 
 char AMDGPUSSARegisterAllocator::ID = 0;
 
@@ -372,19 +375,72 @@ void AMDGPUSSARegisterAllocator::color() {
         } else if (MO.isReg() && MO.isDef() && MO.isImplicit() &&
                    MO.getReg().isPhysical() &&
                    MRI->isAllocatable(MO.getReg().asMCReg())) {
-          // Only an implicit def of an ALLOCATABLE physreg matters: a value
-          // live across it could be colored onto that reg and would be
-          // clobbered (e.g. an inline-asm register clobber). Non-allocatable
-          // implicit defs -- notably implicit-def $scc/$vcc on ordinary ALU ops
-          // (S_CMP, S_ADD, ...) -- can never hold an allocated vreg, so tracking
-          // them only bloats CallSites and slows pickFreePhysReg's O(sites) scan
-          // without ever changing a decision.
+          // An implicit def of an ALLOCATABLE physreg is a clobber site: a value
+          // live across it colored onto that reg would be destroyed (e.g. an
+          // inline-asm register clobber, or an implicit-def $vcc on V_ADD_CO /
+          // V_CMP -- VCC *is* allocatable on AMDGPU). This holds even for a DEAD
+          // def: "dead" means the defined value is unused, but the register write
+          // still happens, so a crossing value in that reg is still clobbered.
+          // Non-allocatable defs (implicit-def $scc) can never hold an allocated
+          // vreg and are excluded by isAllocatable. NB: these sites drive only
+          // the exact per-register IsFree legality check, NOT the ACL priority
+          // set (which is narrowed to real regmask calls below) -- so the flood
+          // of VCC defs no longer perturbs coloring priority on call-free code.
           IsClobberSite = true;
         }
       }
       if (IsClobberSite)
         CallSites.push_back({LIS->getInstructionIndex(MI).getRegSlot(), &MI});
     }
+  LLVM_DEBUG(dbgs() << "CallSites (regmask + allocatable implicit-def): "
+                    << CallSites.size() << "\n");
+
+  // Around-call-liver (ACL) set: vregs whose live interval spans a real CALL
+  // (regmask site). These must go in registers the crossed call preserves
+  // (enforced per-call by the IsFree regmask check). They are colored in a
+  // SEPARATE, EARLIER width-descending walk (phase 0) over the whole function,
+  // before ordinary vregs (phase 1). Priority — not just legality — is the
+  // point: in a single combined walk an ordinary vreg defined before/between
+  // calls grabs a preserved register first, leaving a later-crossing ACL with
+  // nothing free even though IsFree would have allowed it. Coloring all ACLs
+  // first reserves the preserved registers they need across the whole function.
+  //
+  // Only REGMASK (call) sites drive this priority set, NOT every clobber site.
+  // A regmask clobbers a large caller-saved partition, so a value crossing it is
+  // genuinely squeezed into the preserved subset and benefits from priority. A
+  // lone implicit physreg def (e.g. a live implicit-def $vcc on V_ADD_CO) only
+  // clobbers that ONE register; the exact per-register IsFree check already
+  // rejects that single reg for a crossing value, and no phase-0 priority is
+  // warranted. Including such sites floods the ACL set on call-free code
+  // (V_ADD_CO/V_CMP emit VCC defs everywhere), needlessly reorders coloring, and
+  // has triggered downstream SSA-destruction crashes. IsFree still consults ALL
+  // of CallSites for legality — only the ACL priority membership is narrowed.
+  DenseSet<Register> ACLSet;
+  {
+    SmallVector<SlotIndex, 8> CallOnlySites;
+    for (const auto &[CallIdx, CallMI] : CallSites)
+      if (CallMI->isCall())
+        CallOnlySites.push_back(CallIdx);
+    if (!CallOnlySites.empty())
+      for (unsigned I = 0, E = MRI->getNumVirtRegs(); I < E; ++I) {
+        Register VReg = Register::index2VirtReg(I);
+        if (MRI->reg_nodbg_empty(VReg) || !LIS->hasInterval(VReg))
+          continue;
+        const LiveInterval &LI = LIS->getInterval(VReg);
+        for (SlotIndex CS : CallOnlySites)
+          if (LI.liveAt(CS)) {
+            ACLSet.insert(VReg);
+            break;
+          }
+      }
+  }
+  LLVM_DEBUG(dbgs() << "ACL set: " << ACLSet.size()
+                    << " vregs live across calls\n");
+
+  // Phase 0 = ACL vregs, phase 1 = ordinary. Skip phase 0 when no ACLs exist.
+  for (unsigned Phase = (ACLSet.empty() ? 1 : 0); Phase < 2; ++Phase) {
+    LLVM_DEBUG(dbgs() << "\n=== Coloring phase " << Phase << " ("
+                      << (Phase == 0 ? "ACL" : "ordinary") << ") ===\n");
 
   for (unsigned Width : ColoringOrder) {
     for (auto *Node : depth_first(MDT->getRootNode())) {
@@ -500,6 +556,17 @@ void AMDGPUSSARegisterAllocator::color() {
             continue;
           }
 
+          // Phase filter: phase 0 colors only ACL vregs, phase 1 only the rest.
+          // A def for the other phase is skipped; if already colored in phase 0
+          // (an ACL def revisited in phase 1), mark its physreg occupied at its
+          // def so phase-1 values do not reuse it (kill path frees it at its last
+          // use, exactly as for a wider already-colored def).
+          if (ACLSet.contains(Reg) != (Phase == 0)) {
+            if (auto It = ColorMap.find(Reg); It != ColorMap.end())
+              markOccupied(It->second);
+            continue;
+          }
+
           MCRegister Chosen;
           unsigned UseOpIdx;
           bool IsTied = MI.isRegTiedToUseOperand(MO.getOperandNo(), &UseOpIdx);
@@ -577,7 +644,8 @@ void AMDGPUSSARegisterAllocator::color() {
           markFree(PR);
       }
     }
-  }
+  } // width loop
+  } // phase loop
 
   LLVM_DEBUG({
     dbgs() << "\nColoring result:\n";
@@ -853,10 +921,9 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
 
   SmallVector<MachineInstr *, 16> PHIsToErase;
 
-  // Step-0 metric accumulators (see PHI_Coalescer design section 9). Function-
-  // local; folded into the STATISTIC counters here and printed as one per-
-  // function line under -debug-only=amdgpu-phi-metric so a diff of two llc runs
-  // is a diff of these lines.
+  // Step-0 metric accumulators (see PHI_Coalescer section 9). Function-local;
+  // folded into the STATISTIC counters as we go so -debug-only can print a
+  // per-function line without disturbing the global totals.
   unsigned FnCopies = 0, FnFixed = 0, FnUndef = 0;
   uint64_t FnWeight = 0;
 
@@ -894,8 +961,6 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
         // PHIElimination does for undef PHI operands).
         if (SrcMO.isUndef()) {
           PredCopies[Pred].push_back({MCRegister(), DstPhys});
-          // Undef edges emit IMPLICIT_DEF, not a copy; they are not part of the
-          // coalescer's objective, so track them separately.
           ++NumPhiUndefEdges;
           ++FnUndef;
           continue;
@@ -914,18 +979,50 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
 
         if (SrcPhys != DstPhys) {
           PredCopies[Pred].push_back({SrcPhys, DstPhys});
-          // Not a fixed point: a copy is emitted on this edge. Weight it by
-          // 2^loopdepth(Pred) so loop-carried copies dominate the cost, per the
-          // paper's cost_f (eq.1).
+          // Not a fixed point: a copy will be emitted on this edge. Weight it
+          // by 2^loopdepth(Pred) so loop-carried copies dominate the cost, per
+          // the paper's cost_f (eq.1).
           ++NumPhiCopies;
           ++FnCopies;
           unsigned Depth = MLI->getLoopDepth(Pred);
           uint64_t W = Depth < 63 ? (uint64_t(1) << Depth) : ~uint64_t(0);
           NumPhiCopyWeight += W;
           FnWeight += W;
+          // Feasibility ceiling: a copy can only ever become a fixed point if
+          // the operand does not interfere with the PHI result. The operand may
+          // read only a slice of a wider value (e.g. %x.sub0), so interference
+          // must be tested at LANE granularity, not whole-vreg: a sibling lane
+          // of the source can be live across the result's range while the READ
+          // lane is not. Restrict the source interval to the operand's lane mask
+          // (subranges are always present -- GCN enables subreg liveness
+          // unconditionally) and overlap only those lanes with the result.
+          const LiveInterval &SrcLI = LIS->getInterval(SrcMO.getReg());
+          const LiveInterval &DstLI = LIS->getInterval(DstVReg);
+          LaneBitmask ReadMask =
+              SrcMO.getSubReg()
+                  ? TRI->getSubRegIndexLaneMask(SrcMO.getSubReg())
+                  : MRI->getMaxLaneMaskForVReg(SrcMO.getReg());
+          bool Interferes;
+          if (SrcLI.hasSubRanges()) {
+            Interferes = false;
+            for (const LiveInterval::SubRange &S : SrcLI.subranges())
+              if ((S.LaneMask & ReadMask).any() && S.overlaps(DstLI)) {
+                Interferes = true;
+                break;
+              }
+          } else {
+            // Whole-register value (no subranges): the read covers all lanes.
+            Interferes = SrcLI.overlaps(DstLI);
+          }
+          if (Interferes)
+            ++NumPhiCopyInfeasible;
+          else
+            ++NumPhiCopyFeasible;
+          if (SrcMO.getSubReg())
+            ++NumPhiCopySubreg; // keep the tuple-source tally for context
         } else {
           // SrcPhys == DstPhys: already a fixed point, no copy. This is exactly
-          // what the future coalescer manufactures.
+          // what Option B / the coalescer manufactures.
           ++NumPhiFixedPoints;
           ++FnFixed;
         }
@@ -970,11 +1067,12 @@ void AMDGPUSSARegisterAllocator::lowerPHIs(MachineFunction &MF) {
 
   LLVM_DEBUG(dbgs() << "  Erased " << PHIsToErase.size() << " PHIs\n");
 
-  // Per-function metric line (opt-in via its own debug type, independent of the
-  // pass's verbose output): a diff of two llc runs is a diff of these lines.
+  // Per-function metric line (opt-in): a diff of two llc runs is a diff of these
+  // lines. Gated on its own debug type so it is independent of the pass's
+  // verbose -debug-only=amdgpu-ssa-register-allocator output.
   DEBUG_WITH_TYPE(PHI_METRIC_DEBUG_TYPE,
-                  dbgs() << "phi-metric " << MF.getName()
-                         << ": copies=" << FnCopies << " fixed=" << FnFixed
+                  dbgs() << "phi-metric " << MF.getName() << ": copies="
+                         << FnCopies << " fixed=" << FnFixed
                          << " undef=" << FnUndef << " weighted=" << FnWeight
                          << "\n");
 }
@@ -1145,14 +1243,9 @@ void AMDGPUSSARegisterAllocator::destroySSAAndRewrite(MachineFunction &MF) {
   if (hasCFPseudos(MF)) {
     LLVM_DEBUG(dbgs() << "SSA Destruction: skipped — "
                          "SI control-flow pseudos present\n");
-    // The PHI-copy metric (and the future coalescer) never sees this function;
-    // record it so the corpus baseline reports the measurable fraction, not a
-    // silent denominator.
-    ++NumPhiFuncsSkippedCF;
     return;
   }
 
-  ++NumPhiFuncsMeasured;
   lowerPHIs(MF);
   rewriteOperands(MF);
   eliminateRegSequences(MF);

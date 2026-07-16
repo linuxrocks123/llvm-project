@@ -104,6 +104,21 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   unsigned VGPRLimit = 0;
   unsigned SGPRLimit = 0;
 
+  // Second RP dimension: values that cross ANY call are pinned to callee-saved
+  // registers for their whole range, so a per-point "preserved-RP" over the
+  // pinned set must fit the callee-saved capacity k_cs (per file). See the
+  // preserved-RP gate in processFunction and ACL_Pass_and_CallSite_Capacity.
+  DenseSet<Register> PinnedVRegs;           // vregs crossing any call
+  unsigned VGPRPreservedCap = 0;            // k_cs for VGPR file
+  unsigned SGPRPreservedCap = 0;            // k_cs for SGPR file
+  unsigned PreservedLimit = 0;              // k_cs for the current pass's file
+
+  /// Classify PinnedVRegs (crosses any call) and compute VGPR/SGPRPreservedCap
+  /// (min preserved allocatable count over the function's calls). Re-run before
+  /// each ACL pass, since spilling creates reload vregs that themselves cross
+  /// calls (and are pinned).
+  void computePinnedAndCap(MachineFunction &MF);
+
   // Current pass type for RP calculation.
   bool IsVGPRPass = false;
 
@@ -114,8 +129,11 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   // Reload optimizer: cached max RP per block (cleared per spill analysis)
   DenseMap<MachineBasicBlock *, unsigned> MaxRPCache;
 
-  // Track reloads per block to avoid duplicates
-  DenseMap<std::pair<MachineBasicBlock *, Register>, Register> BlockReloadCache;
+  // Track reloads per block to avoid duplicates. Keyed by (block, reloaded
+  // VReg+mask) so a narrow sub-slice reload and a wider reload of the same vreg
+  // in one block are distinct cache entries.
+  DenseMap<std::pair<MachineBasicBlock *, VRegMaskPair>, Register>
+      BlockReloadCache;
 
   // TODO: Add tracking for spilled/reloaded registers if needed for
   // verification
@@ -140,6 +158,23 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   /// This is called twice: first for SGPRs, then for VGPRs.
   /// Uses IsVGPRPass class member (set before calling).
   bool processFunction(MachineFunction &MF, unsigned RPLimit);
+
+  /// ACL (around-call-liver) preserved-RP pass for the current file
+  /// (IsVGPRPass). For each call C in program order, if the width-weighted set
+  /// of pinned vregs live across C exceeds the callee-saved capacity k_cs, spill
+  /// the excess (clean candidates first, then farthest next use) by
+  /// store-at-def + free-across-C. The free point (KillIdx) is chosen per value:
+  ///   - if V has a use that dominates C (a pre-call use on the path to C), kill
+  ///     at the DEEPEST such use — V keeps its register up to there, is dead
+  ///     across C, and post-call uses reload after C;
+  ///   - otherwise (no C-dominating use) kill at C itself, which makes V dead
+  ///     exactly at C;
+  ///   - a value read AT C (call operand/target) is unspillable for C and only
+  ///     contributes to the infeasibility floor.
+  /// Runs before the ordinary total-RP processFunction pass for the same file.
+  /// Returns true if any spill was performed. Relies on PinnedVRegs / the k_cs
+  /// caps computed by computePinnedAndCap(MF).
+  bool processACLCalls(MachineFunction &MF);
 
   /// Validates that final register pressure is within limits after all
   /// spilling. This is a temporary validation check until we properly handle
@@ -189,6 +224,15 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
                       VRegMaskPairSet &Active, unsigned CurRP,
                       unsigned RPLimit);
 
+  /// Spill one value with a caller-chosen free point: store at its definition
+  /// (EXEC-safe), then free the register from \p KillIdx onward and place
+  /// reloads at the uses reachable from there (dominance-ordered, SSA repaired
+  /// inline). \p KillIdx is the sole knob that decides where the register
+  /// becomes free — the existing walk derives it from the high-pressure point;
+  /// the ACL per-call driver derives it relative to a call. Store placement is
+  /// always at the def and is never affected by \p KillIdx.
+  void spillOneVMP(VRegMaskPair VMP, SlotIndex KillIdx);
+
   /// Stores register to stack slot right after its definition (when EXEC is
   /// full). This avoids EXEC drift issues by ensuring all lanes are stored
   /// before any divergent control flow can modify EXEC. Returns the store
@@ -219,9 +263,15 @@ class AMDGPUSSARegisterSpiller : public MachineFunctionPass {
   /// If InsertBefore is provided, inserts before that instruction.
   /// Otherwise inserts at block end (before terminator) and caches the result.
   /// Returns {ReloadReg, ReloadMI}. ReloadMI is nullptr if using cached reload.
+  /// \p ReloadMask selects which of SpilledVMP's lanes to actually reload now
+  /// (default: all of them). The stack slot is always the full SpilledVMP slot;
+  /// only the reloaded sub-slice (dest subreg, class, and in-slot offset) is
+  /// narrowed, so a use that reads a few lanes does not pull the whole tuple
+  /// back into registers.
   std::pair<Register, MachineInstr *>
   getOrCreateReloadInBlock(MachineBasicBlock *BB, VRegMaskPair SpilledVMP,
-                           MachineInstr *InsertBefore = nullptr);
+                           MachineInstr *InsertBefore = nullptr,
+                           LaneBitmask ReloadMask = LaneBitmask::getAll());
 
   /// Insert reload for a use instruction. For PHI uses, inserts in predecessor
   /// blocks. For non-PHI uses, handles loop adjustment.
