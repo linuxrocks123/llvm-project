@@ -169,7 +169,7 @@ public:
     AU.addPreserved<SlotIndexesWrapperPass>();
     AU.addPreserved<LiveIntervalsWrapperPass>();
     AU.addPreserved<LiveVariablesWrapperPass>();
-    AU.addPreserved<MachineBlockFrequencyInfoWrapperPass>();
+    //AU.addPreserved<MachineBlockFrequencyInfoWrapperPass>();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
 };
@@ -902,15 +902,9 @@ SILowerControlFlowPass::run(MachineFunction &MF,
   auto PA = getMachineFunctionPassPreservedAnalyses();
   PA.preserve<MachineDominatorTreeAnalysis>();
   PA.preserve<MachinePostDominatorTreeAnalysis>();
-<<<<<<< HEAD
   PA.preserve<SlotIndexesAnalysis>();
   PA.preserve<LiveIntervalsAnalysis>();
   PA.preserve<LiveVariablesAnalysis>();
-=======
-  //PA.preserve<SlotIndexesAnalysis>();
-  //PA.preserve<LiveIntervalsAnalysis>();
-  //PA.preserve<LiveVariablesAnalysis>();
-  PA.preserve<MachineBlockFrequencyAnalysis>();
->>>>>>> 995fded2a5c4 (Some bugfixing, not finished)
+  //PA.preserve<MachineBlockFrequencyAnalysis>();
   return PA;
 }
