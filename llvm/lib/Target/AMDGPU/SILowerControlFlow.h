@@ -16,14 +16,6 @@ class SILowerControlFlowPass : public PassInfoMixin<SILowerControlFlowPass> {
 public:
   PreservedAnalyses run(MachineFunction &MF,
                         MachineFunctionAnalysisManager &MFAM);
-
-  MachineFunctionProperties getRequiredProperties() const {
-    return MachineFunctionProperties().setIsSSA();
-  }
-
-  MachineFunctionProperties getClearedProperties() const {
-    return MachineFunctionProperties().setNoPHIs();
-  }
 };
 } // namespace llvm
 
