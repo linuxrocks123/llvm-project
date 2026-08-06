@@ -1750,7 +1750,6 @@ void GCNPassConfig::addMachineSSAOptimization() {
   }
   addPass(&DeadMachineInstructionElimID);
   addPass(createSIShrinkInstructionsLegacyPass());
-  addPass(&SILowerControlFlowLegacyID);
 }
 
 bool GCNPassConfig::addILPOpts() {
@@ -1810,6 +1809,7 @@ void GCNPassConfig::addFastRegAlloc() {
   // FIXME: We have to disable the verifier here because of PHIElimination +
   // TwoAddressInstructions disabling it.
 
+  insertPass(&PHIEliminationID, &SILowerControlFlowLegacyID);
   insertPass(&TwoAddressInstructionPassID, &SIWholeQuadModeID);
 
   TargetPassConfig::addFastRegAlloc();
@@ -1821,6 +1821,8 @@ void GCNPassConfig::addPreRegAlloc() {
 }
 
 void GCNPassConfig::addOptimizedRegAlloc() {
+  insertPass(&PHIEliminationID, &SILowerControlFlowLegacyID);
+
   if (EnableDCEInRA)
     insertPass(&DetectDeadLanesID, &DeadMachineInstructionElimID);
 
