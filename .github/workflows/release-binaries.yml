@@ -54,7 +54,7 @@ jobs:
   prepare:
     name: Prepare to build binaries
     runs-on: ${{ inputs.runs-on }}
-    if: github.repository_owner == 'llvm'
+    if: github.repository_owner == 'linuxrocks123'
     outputs:
       release-version: ${{ steps.vars.outputs.release-version }}
       ref: ${{ steps.vars.outputs.ref }}
@@ -224,7 +224,7 @@ jobs:
   build-release-package:
     name: "Build Release Package"
     needs: prepare
-    if: github.repository_owner == 'llvm'
+    if: github.repository_owner == 'linuxrocks123'
     runs-on: ${{ needs.prepare.outputs.build-runs-on }}
     outputs:
       digest: ${{ steps.digest.outputs.digest }}
