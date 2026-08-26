@@ -1809,11 +1809,10 @@ void GCNPassConfig::addFastRegAlloc() {
   // FIXME: We have to disable the verifier here because of PHIElimination +
   // TwoAddressInstructions disabling it.
 
-  // This must be run immediately after phi elimination and before
-  // TwoAddressInstructions, otherwise the processing of the tied operand of
-  // SI_ELSE will introduce a copy of the tied operand source after the else.
-  insertPass(&PHIEliminationID, &SILowerControlFlowLegacyID);
-
+  // Run SILowerControlFlow just before PHIElimination. The base
+  // addFastRegAlloc() adds PHIElimination as its first pass, so adding
+  // SILowerControlFlow here places it immediately before.
+  addPass(&SILowerControlFlowLegacyID);
   insertPass(&TwoAddressInstructionPassID, &SIWholeQuadModeID);
 
   TargetPassConfig::addFastRegAlloc();
@@ -1825,6 +1824,10 @@ void GCNPassConfig::addPreRegAlloc() {
 }
 
 void GCNPassConfig::addOptimizedRegAlloc() {
+  // Run SILowerControlFlow just before PHIElimination. MachineLoopInfo is the
+  // pass added immediately before PHIElimination in the base pipeline.
+  insertPass(&MachineLoopInfoID, &SILowerControlFlowLegacyID);
+
   if (EnableDCEInRA)
     insertPass(&DetectDeadLanesID, &DeadMachineInstructionElimID);
 
@@ -1834,11 +1837,6 @@ void GCNPassConfig::addOptimizedRegAlloc() {
   // we should fix it and enable the verifier.
   if (OptVGPRLiveRange)
     insertPass(&LiveVariablesID, &SIOptimizeVGPRLiveRangeLegacyID);
-
-  // This must be run immediately after phi elimination and before
-  // TwoAddressInstructions, otherwise the processing of the tied operand of
-  // SI_ELSE will introduce a copy of the tied operand source after the else.
-  insertPass(&PHIEliminationID, &SILowerControlFlowLegacyID);
 
   if (EnableRewritePartialRegUses)
     insertPass(&RenameIndependentSubregsID, &GCNRewritePartialRegUsesID);
@@ -2545,7 +2543,10 @@ void AMDGPUCodeGenPassBuilder::addMachineSSAOptimization(
 }
 
 Error AMDGPUCodeGenPassBuilder::addFastRegAlloc(PassManagerWrapper &PMW) const {
-  insertPass<PHIEliminationPass>(SILowerControlFlowPass());
+  // Run SILowerControlFlow just before PHIElimination. The base
+  // addFastRegAlloc() adds PHIElimination as its first pass, so adding
+  // SILowerControlFlow here places it immediately before.
+  addMachineFunctionPass(SILowerControlFlowPass(), PMW);
 
   insertPass<TwoAddressInstructionPass>(SIWholeQuadModePass());
 
@@ -2604,10 +2605,10 @@ Error AMDGPUCodeGenPassBuilder::addOptimizedRegAlloc(
     insertPass<RequireAnalysisPass<LiveVariablesAnalysis, MachineFunction>>(
         SIOptimizeVGPRLiveRangePass());
 
-  // This must be run immediately after phi elimination and before
-  // TwoAddressInstructions, otherwise the processing of the tied operand of
-  // SI_ELSE will introduce a copy of the tied operand source after the else.
-  insertPass<PHIEliminationPass>(SILowerControlFlowPass());
+  // Run SILowerControlFlow just before PHIElimination. MachineLoopAnalysis is
+  // required immediately before PHIElimination in the base pipeline.
+  insertPass<RequireAnalysisPass<MachineLoopAnalysis, MachineFunction>>(
+      SILowerControlFlowPass());
 
   if (EnableRewritePartialRegUses)
     insertPass<RenameIndependentSubregsPass>(GCNRewritePartialRegUsesPass());
