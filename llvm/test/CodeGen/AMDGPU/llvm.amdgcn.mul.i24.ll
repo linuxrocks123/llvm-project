@@ -15,15 +15,6 @@ define amdgpu_kernel void @test_mul_i24(ptr addrspace(1) %out, i32 %src1, i32 %s
 ; GCN-NEXT:    v_mul_i32_i24_e32 v0, s2, v0
 ; GCN-NEXT:    buffer_store_dword v0, off, s[4:7], 0
 ; GCN-NEXT:    s_endpgm
-;
-; GFX12-LABEL: test_mul_i24:
-; GFX12:       ; %bb.0:
-; GFX12-NEXT:    s_load_b128 s[0:3], s[4:5], 0x24
-; GFX12-NEXT:    v_mov_b32_e32 v0, 0
-; GFX12-NEXT:    s_wait_kmcnt 0x0
-; GFX12-NEXT:    v_mul_i32_i24_e64 v1, s2, s3
-; GFX12-NEXT:    global_store_b32 v0, v1, s[0:1]
-; GFX12-NEXT:    s_endpgm
   %val = call i32 @llvm.amdgcn.mul.i24(i32 %src1, i32 %src2) #0
   store i32 %val, ptr addrspace(1) %out
   ret void
