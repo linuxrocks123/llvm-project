@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   commit-access-review:
-    if: github.repository_owner == 'llvm'
+    if: github.repository_owner == 'linuxrocks123'
     environment: main-branch-only
     runs-on: ubuntu-24.04
     steps:

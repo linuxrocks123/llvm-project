@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.repository_owner == 'llvm'
+    if: github.repository_owner == 'linuxrocks123'
     name: Check LLVM_ABI annotations with ids
     runs-on: ubuntu-24.04
     container:

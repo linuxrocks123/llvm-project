@@ -11,7 +11,7 @@ on:
 
 jobs:
   code_linter:
-    if: github.repository_owner == 'llvm'
+    if: github.repository_owner == 'linuxrocks123'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     concurrency:
