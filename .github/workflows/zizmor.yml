@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   zizmor:
-    if: github.repository_owner == 'llvm'
+    if: github.repository_owner == 'linuxrocks123'
     name: Run zizmor
     runs-on: ubuntu-24.04
     permissions:
