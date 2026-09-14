@@ -790,22 +790,22 @@ define amdgpu_kernel void @fadd_a_a_b_f32(ptr addrspace(1) %out, ptr addrspace(1
 ; SI-FLUSH-NEXT:    buffer_store_dword v3, v[4:5], s[0:3], 0 addr64
 ; SI-FLUSH-NEXT:    s_endpgm
 ;
-; SI-DENORM-FASTFMA-STRICT-LABEL: fadd_a_a_b_f32:
-; SI-DENORM-FASTFMA-STRICT:       ; %bb.0:
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_load_dwordx2 s[0:1], s[4:5], 0x9
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s3, 0xf000
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s2, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_lshlrev_b32_e32 v4, 2, v0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_mov_b32_e32 v5, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt lgkmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v2, v[4:5], s[0:3], 0 addr64 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v3, v[4:5], s[0:3], 0 addr64 offset:4 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_add_f32_e32 v2, v2, v2
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_add_f32_e32 v2, v2, v3
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_store_dword v2, v[4:5], s[0:3], 0 addr64
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_endpgm
+; SI-DENORM-FASTFMA-LABEL: fadd_a_a_b_f32:
+; SI-DENORM-FASTFMA:       ; %bb.0:
+; SI-DENORM-FASTFMA-NEXT:    s_load_dwordx2 s[0:1], s[4:5], 0x9
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s3, 0xf000
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s2, 0
+; SI-DENORM-FASTFMA-NEXT:    v_lshlrev_b32_e32 v4, 2, v0
+; SI-DENORM-FASTFMA-NEXT:    v_mov_b32_e32 v5, 0
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt lgkmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v2, v[4:5], s[0:3], 0 addr64 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v3, v[4:5], s[0:3], 0 addr64 offset:4 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    v_add_f32_e32 v2, v2, v2
+; SI-DENORM-FASTFMA-NEXT:    v_add_f32_e32 v2, v2, v3
+; SI-DENORM-FASTFMA-NEXT:    buffer_store_dword v2, v[4:5], s[0:3], 0 addr64
+; SI-DENORM-FASTFMA-NEXT:    s_endpgm
 ;
 ; SI-DENORM-SLOWFMA-LABEL: fadd_a_a_b_f32:
 ; SI-DENORM-SLOWFMA:       ; %bb.0:
@@ -924,22 +924,22 @@ define amdgpu_kernel void @fadd_b_a_a_f32(ptr addrspace(1) %out, ptr addrspace(1
 ; SI-FLUSH-NEXT:    buffer_store_dword v3, v[4:5], s[0:3], 0 addr64
 ; SI-FLUSH-NEXT:    s_endpgm
 ;
-; SI-DENORM-FASTFMA-STRICT-LABEL: fadd_b_a_a_f32:
-; SI-DENORM-FASTFMA-STRICT:       ; %bb.0:
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_load_dwordx2 s[0:1], s[4:5], 0x9
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s3, 0xf000
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s2, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_lshlrev_b32_e32 v4, 2, v0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_mov_b32_e32 v5, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt lgkmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v2, v[4:5], s[0:3], 0 addr64 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v3, v[4:5], s[0:3], 0 addr64 offset:4 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_add_f32_e32 v2, v2, v2
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_add_f32_e32 v2, v3, v2
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_store_dword v2, v[4:5], s[0:3], 0 addr64
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_endpgm
+; SI-DENORM-FASTFMA-LABEL: fadd_b_a_a_f32:
+; SI-DENORM-FASTFMA:       ; %bb.0:
+; SI-DENORM-FASTFMA-NEXT:    s_load_dwordx2 s[0:1], s[4:5], 0x9
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s3, 0xf000
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s2, 0
+; SI-DENORM-FASTFMA-NEXT:    v_lshlrev_b32_e32 v4, 2, v0
+; SI-DENORM-FASTFMA-NEXT:    v_mov_b32_e32 v5, 0
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt lgkmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v2, v[4:5], s[0:3], 0 addr64 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v3, v[4:5], s[0:3], 0 addr64 offset:4 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    v_add_f32_e32 v2, v2, v2
+; SI-DENORM-FASTFMA-NEXT:    v_add_f32_e32 v2, v3, v2
+; SI-DENORM-FASTFMA-NEXT:    buffer_store_dword v2, v[4:5], s[0:3], 0 addr64
+; SI-DENORM-FASTFMA-NEXT:    s_endpgm
 ;
 ; SI-DENORM-SLOWFMA-LABEL: fadd_b_a_a_f32:
 ; SI-DENORM-SLOWFMA:       ; %bb.0:
@@ -1563,26 +1563,26 @@ define amdgpu_kernel void @mad_sub_f32(ptr addrspace(1) noalias nocapture %out, 
 ; SI-FLUSH-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
 ; SI-FLUSH-NEXT:    s_endpgm
 ;
-; SI-DENORM-FASTFMA-STRICT-LABEL: mad_sub_f32:
-; SI-DENORM-FASTFMA-STRICT:       ; %bb.0:
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x9
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s7, 0xf000
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s6, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_lshlrev_b32_e32 v6, 2, v0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_mov_b32_e32 v7, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt lgkmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b64 s[4:5], s[2:3]
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v2, v[6:7], s[4:7], 0 addr64 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v3, v[6:7], s[4:7], 0 addr64 offset:4 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v4, v[6:7], s[4:7], 0 addr64 offset:8 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b64 s[2:3], s[6:7]
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_mul_f32_e32 v2, v2, v3
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_sub_f32_e32 v2, v2, v4
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_endpgm
+; SI-DENORM-FASTFMA-LABEL: mad_sub_f32:
+; SI-DENORM-FASTFMA:       ; %bb.0:
+; SI-DENORM-FASTFMA-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x9
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s7, 0xf000
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s6, 0
+; SI-DENORM-FASTFMA-NEXT:    v_lshlrev_b32_e32 v6, 2, v0
+; SI-DENORM-FASTFMA-NEXT:    v_mov_b32_e32 v7, 0
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt lgkmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b64 s[4:5], s[2:3]
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v2, v[6:7], s[4:7], 0 addr64 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v3, v[6:7], s[4:7], 0 addr64 offset:4 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v4, v[6:7], s[4:7], 0 addr64 offset:8 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b64 s[2:3], s[6:7]
+; SI-DENORM-FASTFMA-NEXT:    v_mul_f32_e32 v2, v2, v3
+; SI-DENORM-FASTFMA-NEXT:    v_sub_f32_e32 v2, v2, v4
+; SI-DENORM-FASTFMA-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
+; SI-DENORM-FASTFMA-NEXT:    s_endpgm
 ;
 ; SI-DENORM-SLOWFMA-LABEL: mad_sub_f32:
 ; SI-DENORM-SLOWFMA:       ; %bb.0:
@@ -1724,26 +1724,26 @@ define amdgpu_kernel void @mad_sub_inv_f32(ptr addrspace(1) noalias nocapture %o
 ; SI-FLUSH-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
 ; SI-FLUSH-NEXT:    s_endpgm
 ;
-; SI-DENORM-FASTFMA-STRICT-LABEL: mad_sub_inv_f32:
-; SI-DENORM-FASTFMA-STRICT:       ; %bb.0:
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x9
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s7, 0xf000
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s6, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_lshlrev_b32_e32 v6, 2, v0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_mov_b32_e32 v7, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt lgkmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b64 s[4:5], s[2:3]
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v2, v[6:7], s[4:7], 0 addr64 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v3, v[6:7], s[4:7], 0 addr64 offset:4 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v4, v[6:7], s[4:7], 0 addr64 offset:8 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b64 s[2:3], s[6:7]
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_mul_f32_e32 v2, v2, v3
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_sub_f32_e32 v2, v4, v2
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_endpgm
+; SI-DENORM-FASTFMA-LABEL: mad_sub_inv_f32:
+; SI-DENORM-FASTFMA:       ; %bb.0:
+; SI-DENORM-FASTFMA-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x9
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s7, 0xf000
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s6, 0
+; SI-DENORM-FASTFMA-NEXT:    v_lshlrev_b32_e32 v6, 2, v0
+; SI-DENORM-FASTFMA-NEXT:    v_mov_b32_e32 v7, 0
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt lgkmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b64 s[4:5], s[2:3]
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v2, v[6:7], s[4:7], 0 addr64 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v3, v[6:7], s[4:7], 0 addr64 offset:4 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v4, v[6:7], s[4:7], 0 addr64 offset:8 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b64 s[2:3], s[6:7]
+; SI-DENORM-FASTFMA-NEXT:    v_mul_f32_e32 v2, v2, v3
+; SI-DENORM-FASTFMA-NEXT:    v_sub_f32_e32 v2, v4, v2
+; SI-DENORM-FASTFMA-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
+; SI-DENORM-FASTFMA-NEXT:    s_endpgm
 ;
 ; SI-DENORM-SLOWFMA-LABEL: mad_sub_inv_f32:
 ; SI-DENORM-SLOWFMA:       ; %bb.0:
@@ -1885,26 +1885,26 @@ define amdgpu_kernel void @mad_sub_fabs_f32(ptr addrspace(1) noalias nocapture %
 ; SI-FLUSH-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
 ; SI-FLUSH-NEXT:    s_endpgm
 ;
-; SI-DENORM-FASTFMA-STRICT-LABEL: mad_sub_fabs_f32:
-; SI-DENORM-FASTFMA-STRICT:       ; %bb.0:
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x9
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s7, 0xf000
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s6, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_lshlrev_b32_e32 v6, 2, v0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_mov_b32_e32 v7, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt lgkmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b64 s[4:5], s[2:3]
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v2, v[6:7], s[4:7], 0 addr64 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v3, v[6:7], s[4:7], 0 addr64 offset:4 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v4, v[6:7], s[4:7], 0 addr64 offset:8 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b64 s[2:3], s[6:7]
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_mul_f32_e32 v2, v2, v3
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_sub_f32_e64 v2, v2, |v4|
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_endpgm
+; SI-DENORM-FASTFMA-LABEL: mad_sub_fabs_f32:
+; SI-DENORM-FASTFMA:       ; %bb.0:
+; SI-DENORM-FASTFMA-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x9
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s7, 0xf000
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s6, 0
+; SI-DENORM-FASTFMA-NEXT:    v_lshlrev_b32_e32 v6, 2, v0
+; SI-DENORM-FASTFMA-NEXT:    v_mov_b32_e32 v7, 0
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt lgkmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b64 s[4:5], s[2:3]
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v2, v[6:7], s[4:7], 0 addr64 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v3, v[6:7], s[4:7], 0 addr64 offset:4 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v4, v[6:7], s[4:7], 0 addr64 offset:8 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b64 s[2:3], s[6:7]
+; SI-DENORM-FASTFMA-NEXT:    v_mul_f32_e32 v2, v2, v3
+; SI-DENORM-FASTFMA-NEXT:    v_sub_f32_e64 v2, v2, |v4|
+; SI-DENORM-FASTFMA-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
+; SI-DENORM-FASTFMA-NEXT:    s_endpgm
 ;
 ; SI-DENORM-SLOWFMA-LABEL: mad_sub_fabs_f32:
 ; SI-DENORM-SLOWFMA:       ; %bb.0:
@@ -2047,26 +2047,26 @@ define amdgpu_kernel void @mad_sub_fabs_inv_f32(ptr addrspace(1) noalias nocaptu
 ; SI-FLUSH-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
 ; SI-FLUSH-NEXT:    s_endpgm
 ;
-; SI-DENORM-FASTFMA-STRICT-LABEL: mad_sub_fabs_inv_f32:
-; SI-DENORM-FASTFMA-STRICT:       ; %bb.0:
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x9
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s7, 0xf000
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s6, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_lshlrev_b32_e32 v6, 2, v0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_mov_b32_e32 v7, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt lgkmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b64 s[4:5], s[2:3]
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v2, v[6:7], s[4:7], 0 addr64 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v3, v[6:7], s[4:7], 0 addr64 offset:4 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v4, v[6:7], s[4:7], 0 addr64 offset:8 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b64 s[2:3], s[6:7]
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_mul_f32_e32 v2, v2, v3
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_sub_f32_e64 v2, |v4|, v2
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_endpgm
+; SI-DENORM-FASTFMA-LABEL: mad_sub_fabs_inv_f32:
+; SI-DENORM-FASTFMA:       ; %bb.0:
+; SI-DENORM-FASTFMA-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x9
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s7, 0xf000
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s6, 0
+; SI-DENORM-FASTFMA-NEXT:    v_lshlrev_b32_e32 v6, 2, v0
+; SI-DENORM-FASTFMA-NEXT:    v_mov_b32_e32 v7, 0
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt lgkmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b64 s[4:5], s[2:3]
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v2, v[6:7], s[4:7], 0 addr64 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v3, v[6:7], s[4:7], 0 addr64 offset:4 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v4, v[6:7], s[4:7], 0 addr64 offset:8 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b64 s[2:3], s[6:7]
+; SI-DENORM-FASTFMA-NEXT:    v_mul_f32_e32 v2, v2, v3
+; SI-DENORM-FASTFMA-NEXT:    v_sub_f32_e64 v2, |v4|, v2
+; SI-DENORM-FASTFMA-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
+; SI-DENORM-FASTFMA-NEXT:    s_endpgm
 ;
 ; SI-DENORM-SLOWFMA-LABEL: mad_sub_fabs_inv_f32:
 ; SI-DENORM-SLOWFMA:       ; %bb.0:
@@ -2209,26 +2209,26 @@ define amdgpu_kernel void @neg_neg_mad_f32(ptr addrspace(1) noalias nocapture %o
 ; SI-FLUSH-NEXT:    buffer_store_dword v4, v[6:7], s[0:3], 0 addr64
 ; SI-FLUSH-NEXT:    s_endpgm
 ;
-; SI-DENORM-FASTFMA-STRICT-LABEL: neg_neg_mad_f32:
-; SI-DENORM-FASTFMA-STRICT:       ; %bb.0:
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x9
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s7, 0xf000
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s6, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_lshlrev_b32_e32 v6, 2, v0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_mov_b32_e32 v7, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt lgkmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b64 s[4:5], s[2:3]
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v2, v[6:7], s[4:7], 0 addr64 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v3, v[6:7], s[4:7], 0 addr64 offset:4 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v4, v[6:7], s[4:7], 0 addr64 offset:8 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b64 s[2:3], s[6:7]
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_mul_f32_e32 v2, v2, v3
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_add_f32_e32 v2, v4, v2
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_endpgm
+; SI-DENORM-FASTFMA-LABEL: neg_neg_mad_f32:
+; SI-DENORM-FASTFMA:       ; %bb.0:
+; SI-DENORM-FASTFMA-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x9
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s7, 0xf000
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s6, 0
+; SI-DENORM-FASTFMA-NEXT:    v_lshlrev_b32_e32 v6, 2, v0
+; SI-DENORM-FASTFMA-NEXT:    v_mov_b32_e32 v7, 0
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt lgkmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b64 s[4:5], s[2:3]
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v2, v[6:7], s[4:7], 0 addr64 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v3, v[6:7], s[4:7], 0 addr64 offset:4 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v4, v[6:7], s[4:7], 0 addr64 offset:8 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b64 s[2:3], s[6:7]
+; SI-DENORM-FASTFMA-NEXT:    v_mul_f32_e32 v2, v2, v3
+; SI-DENORM-FASTFMA-NEXT:    v_add_f32_e32 v2, v4, v2
+; SI-DENORM-FASTFMA-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
+; SI-DENORM-FASTFMA-NEXT:    s_endpgm
 ;
 ; SI-DENORM-SLOWFMA-LABEL: neg_neg_mad_f32:
 ; SI-DENORM-SLOWFMA:       ; %bb.0:
@@ -2372,26 +2372,26 @@ define amdgpu_kernel void @mad_fabs_sub_f32(ptr addrspace(1) noalias nocapture %
 ; SI-FLUSH-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
 ; SI-FLUSH-NEXT:    s_endpgm
 ;
-; SI-DENORM-FASTFMA-STRICT-LABEL: mad_fabs_sub_f32:
-; SI-DENORM-FASTFMA-STRICT:       ; %bb.0:
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x9
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s7, 0xf000
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s6, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_lshlrev_b32_e32 v6, 2, v0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_mov_b32_e32 v7, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt lgkmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b64 s[4:5], s[2:3]
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v2, v[6:7], s[4:7], 0 addr64 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v3, v[6:7], s[4:7], 0 addr64 offset:4 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v4, v[6:7], s[4:7], 0 addr64 offset:8 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b64 s[2:3], s[6:7]
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_mul_f32_e64 v2, v2, |v3|
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_sub_f32_e32 v2, v2, v4
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_endpgm
+; SI-DENORM-FASTFMA-LABEL: mad_fabs_sub_f32:
+; SI-DENORM-FASTFMA:       ; %bb.0:
+; SI-DENORM-FASTFMA-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x9
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s7, 0xf000
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s6, 0
+; SI-DENORM-FASTFMA-NEXT:    v_lshlrev_b32_e32 v6, 2, v0
+; SI-DENORM-FASTFMA-NEXT:    v_mov_b32_e32 v7, 0
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt lgkmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b64 s[4:5], s[2:3]
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v2, v[6:7], s[4:7], 0 addr64 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v3, v[6:7], s[4:7], 0 addr64 offset:4 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v4, v[6:7], s[4:7], 0 addr64 offset:8 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b64 s[2:3], s[6:7]
+; SI-DENORM-FASTFMA-NEXT:    v_mul_f32_e64 v2, v2, |v3|
+; SI-DENORM-FASTFMA-NEXT:    v_sub_f32_e32 v2, v2, v4
+; SI-DENORM-FASTFMA-NEXT:    buffer_store_dword v2, v[6:7], s[0:3], 0 addr64
+; SI-DENORM-FASTFMA-NEXT:    s_endpgm
 ;
 ; SI-DENORM-SLOWFMA-LABEL: mad_fabs_sub_f32:
 ; SI-DENORM-SLOWFMA:       ; %bb.0:
@@ -2530,22 +2530,22 @@ define amdgpu_kernel void @fsub_c_fadd_a_a_f32(ptr addrspace(1) %out, ptr addrsp
 ; SI-FLUSH-NEXT:    buffer_store_dword v3, v[4:5], s[0:3], 0 addr64
 ; SI-FLUSH-NEXT:    s_endpgm
 ;
-; SI-DENORM-FASTFMA-STRICT-LABEL: fsub_c_fadd_a_a_f32:
-; SI-DENORM-FASTFMA-STRICT:       ; %bb.0:
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_load_dwordx2 s[0:1], s[4:5], 0x9
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s3, 0xf000
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s2, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_lshlrev_b32_e32 v4, 2, v0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_mov_b32_e32 v5, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt lgkmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v2, v[4:5], s[0:3], 0 addr64 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v3, v[4:5], s[0:3], 0 addr64 offset:4 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_add_f32_e32 v2, v2, v2
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_sub_f32_e32 v2, v3, v2
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_store_dword v2, v[4:5], s[0:3], 0 addr64
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_endpgm
+; SI-DENORM-FASTFMA-LABEL: fsub_c_fadd_a_a_f32:
+; SI-DENORM-FASTFMA:       ; %bb.0:
+; SI-DENORM-FASTFMA-NEXT:    s_load_dwordx2 s[0:1], s[4:5], 0x9
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s3, 0xf000
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s2, 0
+; SI-DENORM-FASTFMA-NEXT:    v_lshlrev_b32_e32 v4, 2, v0
+; SI-DENORM-FASTFMA-NEXT:    v_mov_b32_e32 v5, 0
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt lgkmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v2, v[4:5], s[0:3], 0 addr64 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v3, v[4:5], s[0:3], 0 addr64 offset:4 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    v_add_f32_e32 v2, v2, v2
+; SI-DENORM-FASTFMA-NEXT:    v_sub_f32_e32 v2, v3, v2
+; SI-DENORM-FASTFMA-NEXT:    buffer_store_dword v2, v[4:5], s[0:3], 0 addr64
+; SI-DENORM-FASTFMA-NEXT:    s_endpgm
 ;
 ; SI-DENORM-SLOWFMA-LABEL: fsub_c_fadd_a_a_f32:
 ; SI-DENORM-SLOWFMA:       ; %bb.0:
@@ -2665,22 +2665,22 @@ define amdgpu_kernel void @fsub_fadd_a_a_c_f32(ptr addrspace(1) %out, ptr addrsp
 ; SI-FLUSH-NEXT:    buffer_store_dword v2, v[4:5], s[0:3], 0 addr64
 ; SI-FLUSH-NEXT:    s_endpgm
 ;
-; SI-DENORM-FASTFMA-STRICT-LABEL: fsub_fadd_a_a_c_f32:
-; SI-DENORM-FASTFMA-STRICT:       ; %bb.0:
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_load_dwordx2 s[0:1], s[4:5], 0x9
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s3, 0xf000
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_mov_b32 s2, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_lshlrev_b32_e32 v4, 2, v0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_mov_b32_e32 v5, 0
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt lgkmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v2, v[4:5], s[0:3], 0 addr64 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_load_dword v3, v[4:5], s[0:3], 0 addr64 offset:4 glc
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_waitcnt vmcnt(0)
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_add_f32_e32 v2, v2, v2
-; SI-DENORM-FASTFMA-STRICT-NEXT:    v_sub_f32_e32 v2, v2, v3
-; SI-DENORM-FASTFMA-STRICT-NEXT:    buffer_store_dword v2, v[4:5], s[0:3], 0 addr64
-; SI-DENORM-FASTFMA-STRICT-NEXT:    s_endpgm
+; SI-DENORM-FASTFMA-LABEL: fsub_fadd_a_a_c_f32:
+; SI-DENORM-FASTFMA:       ; %bb.0:
+; SI-DENORM-FASTFMA-NEXT:    s_load_dwordx2 s[0:1], s[4:5], 0x9
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s3, 0xf000
+; SI-DENORM-FASTFMA-NEXT:    s_mov_b32 s2, 0
+; SI-DENORM-FASTFMA-NEXT:    v_lshlrev_b32_e32 v4, 2, v0
+; SI-DENORM-FASTFMA-NEXT:    v_mov_b32_e32 v5, 0
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt lgkmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v2, v[4:5], s[0:3], 0 addr64 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    buffer_load_dword v3, v[4:5], s[0:3], 0 addr64 offset:4 glc
+; SI-DENORM-FASTFMA-NEXT:    s_waitcnt vmcnt(0)
+; SI-DENORM-FASTFMA-NEXT:    v_add_f32_e32 v2, v2, v2
+; SI-DENORM-FASTFMA-NEXT:    v_sub_f32_e32 v2, v2, v3
+; SI-DENORM-FASTFMA-NEXT:    buffer_store_dword v2, v[4:5], s[0:3], 0 addr64
+; SI-DENORM-FASTFMA-NEXT:    s_endpgm
 ;
 ; SI-DENORM-SLOWFMA-LABEL: fsub_fadd_a_a_c_f32:
 ; SI-DENORM-SLOWFMA:       ; %bb.0:

@@ -4071,10 +4071,8 @@ define amdgpu_kernel void @v_mul_i128(ptr addrspace(1) %out, ptr addrspace(1) %a
 ; GFX1250-NEXT:    v_and_b32_e32 v17, 0x3ff, v0
 ; GFX1250-NEXT:    s_wait_kmcnt 0x0
 ; GFX1250-NEXT:    s_clause 0x1
-; GFX1250-NEXT:    global_load_b128 v[0:3], v17, s[2:3] scale_offset
-; GFX1250-NEXT:    global_load_b128 v[4:7], v17, s[0:1] scale_offset
-; GFX1250-NEXT:    s_wait_loadcnt 0x1
-; GFX1250-NEXT:    v_dual_mov_b32 v11, 0 :: v_dual_mov_b32 v10, v0
+; GFX1250-NEXT:    global_load_b128 v[0:3], v17, s[0:1] scale_offset
+; GFX1250-NEXT:    global_load_b128 v[4:7], v17, s[2:3] scale_offset
 ; GFX1250-NEXT:    s_wait_loadcnt 0x0
 ; GFX1250-NEXT:    v_mad_nc_u64_u32 v[8:9], v0, v4, 0
 ; GFX1250-NEXT:    v_mad_nc_u64_u32 v[10:11], v4, v2, 0
@@ -4091,14 +4089,13 @@ define amdgpu_kernel void @v_mul_i128(ptr addrspace(1) %out, ptr addrspace(1) %a
 ; GFX1250-NEXT:    v_mad_nc_u64_u32 v[2:3], v0, v5, v[14:15]
 ; GFX1250-NEXT:    v_mad_u32 v0, v7, v0, v11
 ; GFX1250-NEXT:    s_delay_alu instid0(VALU_DEP_2) | instskip(NEXT) | instid1(VALU_DEP_1)
-; GFX1250-NEXT:    v_mad_nc_u64_u32 v[12:13], v4, v1, v[12:13]
-; GFX1250-NEXT:    v_dual_mov_b32 v15, v11 :: v_dual_mov_b32 v9, v12
-; GFX1250-NEXT:    s_delay_alu instid0(VALU_DEP_2) | instskip(NEXT) | instid1(VALU_DEP_1)
-; GFX1250-NEXT:    v_mov_b32_e32 v14, v13
-; GFX1250-NEXT:    v_add_nc_u64_e32 v[10:11], v[10:11], v[14:15]
-; GFX1250-NEXT:    s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
-; GFX1250-NEXT:    v_mad_nc_u64_u32 v[0:1], v5, v1, v[10:11]
-; GFX1250-NEXT:    v_add_nc_u64_e32 v[10:11], v[0:1], v[6:7]
+; GFX1250-NEXT:    v_dual_mov_b32 v14, v3 :: v_dual_mov_b32 v9, v2
+; GFX1250-NEXT:    v_add_nc_u64_e32 v[12:13], v[12:13], v[14:15]
+; GFX1250-NEXT:    s_delay_alu instid0(VALU_DEP_3) | instskip(NEXT) | instid1(VALU_DEP_2)
+; GFX1250-NEXT:    v_mad_u32 v11, v6, v1, v0
+; GFX1250-NEXT:    v_mad_nc_u64_u32 v[0:1], v1, v5, v[12:13]
+; GFX1250-NEXT:    s_delay_alu instid0(VALU_DEP_1)
+; GFX1250-NEXT:    v_add_nc_u64_e32 v[10:11], v[0:1], v[10:11]
 ; GFX1250-NEXT:    global_store_b128 v17, v[8:11], s[2:3] scale_offset
 ; GFX1250-NEXT:    s_endpgm
 ;

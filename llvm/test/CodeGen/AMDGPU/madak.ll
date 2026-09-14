@@ -69,14 +69,14 @@ define amdgpu_kernel void @madak_f32(ptr addrspace(1) noalias %out, ptr addrspac
 ; GFX942-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x24
 ; GFX942-NEXT:    s_load_dwordx2 s[6:7], s[4:5], 0x34
 ; GFX942-NEXT:    v_and_b32_e32 v0, 0x3ff, v0
-; GFX942-NEXT:    v_lshlrev_b32_e32 v0, 2, v0
+; GFX942-NEXT:    v_lshlrev_b32_e32 v3, 2, v0
 ; GFX942-NEXT:    s_waitcnt lgkmcnt(0)
-; GFX942-NEXT:    global_load_dword v1, v0, s[2:3]
-; GFX942-NEXT:    global_load_dword v2, v0, s[6:7]
+; GFX942-NEXT:    global_load_dword v1, v3, s[2:3]
+; GFX942-NEXT:    global_load_dword v2, v3, s[6:7]
 ; GFX942-NEXT:    s_waitcnt vmcnt(0)
 ; GFX942-NEXT:    v_mul_f32_e32 v1, v1, v2
 ; GFX942-NEXT:    v_add_f32_e32 v1, 0x41200000, v1
-; GFX942-NEXT:    global_store_dword v0, v1, s[0:1]
+; GFX942-NEXT:    global_store_dword v3, v1, s[0:1]
 ; GFX942-NEXT:    s_endpgm
 ;
 ; GFX10-MAD-LABEL: madak_f32:
@@ -255,21 +255,21 @@ define amdgpu_kernel void @madak_2_use_f32(ptr addrspace(1) noalias %out, ptr ad
 ; GFX942:       ; %bb.0:
 ; GFX942-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x24
 ; GFX942-NEXT:    v_and_b32_e32 v0, 0x3ff, v0
-; GFX942-NEXT:    v_lshlrev_b32_e32 v0, 2, v0
+; GFX942-NEXT:    v_lshlrev_b32_e32 v4, 2, v0
 ; GFX942-NEXT:    s_waitcnt lgkmcnt(0)
-; GFX942-NEXT:    global_load_dword v1, v0, s[2:3] sc0 sc1
+; GFX942-NEXT:    global_load_dword v1, v4, s[2:3] sc0 sc1
 ; GFX942-NEXT:    s_waitcnt vmcnt(0)
-; GFX942-NEXT:    global_load_dword v2, v0, s[2:3] offset:4 sc0 sc1
+; GFX942-NEXT:    global_load_dword v2, v4, s[2:3] offset:4 sc0 sc1
 ; GFX942-NEXT:    s_waitcnt vmcnt(0)
-; GFX942-NEXT:    global_load_dword v3, v0, s[2:3] offset:8 sc0 sc1
+; GFX942-NEXT:    global_load_dword v3, v4, s[2:3] offset:8 sc0 sc1
 ; GFX942-NEXT:    s_waitcnt vmcnt(0)
 ; GFX942-NEXT:    v_mul_f32_e32 v2, v1, v2
 ; GFX942-NEXT:    v_mul_f32_e32 v1, v1, v3
 ; GFX942-NEXT:    v_add_f32_e32 v2, 0x41200000, v2
 ; GFX942-NEXT:    v_add_f32_e32 v1, 0x41200000, v1
-; GFX942-NEXT:    global_store_dword v0, v2, s[0:1] sc0 sc1
+; GFX942-NEXT:    global_store_dword v4, v2, s[0:1] sc0 sc1
 ; GFX942-NEXT:    s_waitcnt vmcnt(0)
-; GFX942-NEXT:    global_store_dword v0, v1, s[2:3] offset:4 sc0 sc1
+; GFX942-NEXT:    global_store_dword v4, v1, s[2:3] offset:4 sc0 sc1
 ; GFX942-NEXT:    s_waitcnt vmcnt(0)
 ; GFX942-NEXT:    s_endpgm
 ;
@@ -554,14 +554,14 @@ define amdgpu_kernel void @madak_inline_imm_f32(ptr addrspace(1) noalias %out, p
 ; GFX942-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x24
 ; GFX942-NEXT:    s_load_dwordx2 s[6:7], s[4:5], 0x34
 ; GFX942-NEXT:    v_and_b32_e32 v0, 0x3ff, v0
-; GFX942-NEXT:    v_lshlrev_b32_e32 v0, 2, v0
+; GFX942-NEXT:    v_lshlrev_b32_e32 v3, 2, v0
 ; GFX942-NEXT:    s_waitcnt lgkmcnt(0)
-; GFX942-NEXT:    global_load_dword v1, v0, s[2:3]
-; GFX942-NEXT:    global_load_dword v2, v0, s[6:7]
+; GFX942-NEXT:    global_load_dword v1, v3, s[2:3]
+; GFX942-NEXT:    global_load_dword v2, v3, s[6:7]
 ; GFX942-NEXT:    s_waitcnt vmcnt(0)
 ; GFX942-NEXT:    v_mul_f32_e32 v1, v1, v2
 ; GFX942-NEXT:    v_add_f32_e32 v1, 4.0, v1
-; GFX942-NEXT:    global_store_dword v0, v1, s[0:1]
+; GFX942-NEXT:    global_store_dword v3, v1, s[0:1]
 ; GFX942-NEXT:    s_endpgm
 ;
 ; GFX10-MAD-LABEL: madak_inline_imm_f32:
@@ -1010,14 +1010,14 @@ define amdgpu_kernel void @no_madak_src0_modifier_f32(ptr addrspace(1) noalias %
 ; GFX942-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x24
 ; GFX942-NEXT:    s_load_dwordx2 s[6:7], s[4:5], 0x34
 ; GFX942-NEXT:    v_and_b32_e32 v0, 0x3ff, v0
-; GFX942-NEXT:    v_lshlrev_b32_e32 v0, 2, v0
+; GFX942-NEXT:    v_lshlrev_b32_e32 v3, 2, v0
 ; GFX942-NEXT:    s_waitcnt lgkmcnt(0)
-; GFX942-NEXT:    global_load_dword v1, v0, s[2:3]
-; GFX942-NEXT:    global_load_dword v2, v0, s[6:7]
+; GFX942-NEXT:    global_load_dword v1, v3, s[2:3]
+; GFX942-NEXT:    global_load_dword v2, v3, s[6:7]
 ; GFX942-NEXT:    s_waitcnt vmcnt(0)
 ; GFX942-NEXT:    v_mul_f32_e64 v1, |v1|, v2
 ; GFX942-NEXT:    v_add_f32_e32 v1, 0x41200000, v1
-; GFX942-NEXT:    global_store_dword v0, v1, s[0:1]
+; GFX942-NEXT:    global_store_dword v3, v1, s[0:1]
 ; GFX942-NEXT:    s_endpgm
 ;
 ; GFX10-MAD-LABEL: no_madak_src0_modifier_f32:
@@ -1179,14 +1179,14 @@ define amdgpu_kernel void @no_madak_src1_modifier_f32(ptr addrspace(1) noalias %
 ; GFX942-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x24
 ; GFX942-NEXT:    s_load_dwordx2 s[6:7], s[4:5], 0x34
 ; GFX942-NEXT:    v_and_b32_e32 v0, 0x3ff, v0
-; GFX942-NEXT:    v_lshlrev_b32_e32 v0, 2, v0
+; GFX942-NEXT:    v_lshlrev_b32_e32 v3, 2, v0
 ; GFX942-NEXT:    s_waitcnt lgkmcnt(0)
-; GFX942-NEXT:    global_load_dword v1, v0, s[2:3]
-; GFX942-NEXT:    global_load_dword v2, v0, s[6:7]
+; GFX942-NEXT:    global_load_dword v1, v3, s[2:3]
+; GFX942-NEXT:    global_load_dword v2, v3, s[6:7]
 ; GFX942-NEXT:    s_waitcnt vmcnt(0)
 ; GFX942-NEXT:    v_mul_f32_e64 v1, v1, |v2|
 ; GFX942-NEXT:    v_add_f32_e32 v1, 0x41200000, v1
-; GFX942-NEXT:    global_store_dword v0, v1, s[0:1]
+; GFX942-NEXT:    global_store_dword v3, v1, s[0:1]
 ; GFX942-NEXT:    s_endpgm
 ;
 ; GFX10-MAD-LABEL: no_madak_src1_modifier_f32:
@@ -1451,17 +1451,17 @@ define amdgpu_kernel void @madak_f32_contract(ptr addrspace(1) noalias %out, ptr
 ; GFX6-NEXT:    s_load_dwordx2 s[8:9], s[4:5], 0xd
 ; GFX6-NEXT:    s_mov_b32 s7, 0xf000
 ; GFX6-NEXT:    s_mov_b32 s6, 0
-; GFX6-NEXT:    v_lshlrev_b32_e32 v0, 2, v0
+; GFX6-NEXT:    v_lshlrev_b32_e32 v4, 2, v0
 ; GFX6-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX6-NEXT:    s_mov_b64 s[4:5], s[2:3]
-; GFX6-NEXT:    v_mov_b32_e32 v1, 0
+; GFX6-NEXT:    v_mov_b32_e32 v5, 0
 ; GFX6-NEXT:    s_mov_b64 s[10:11], s[6:7]
-; GFX6-NEXT:    buffer_load_dword v2, v[0:1], s[4:7], 0 addr64
-; GFX6-NEXT:    buffer_load_dword v3, v[0:1], s[8:11], 0 addr64
+; GFX6-NEXT:    buffer_load_dword v2, v[4:5], s[4:7], 0 addr64
+; GFX6-NEXT:    buffer_load_dword v3, v[4:5], s[8:11], 0 addr64
 ; GFX6-NEXT:    s_mov_b64 s[2:3], s[6:7]
 ; GFX6-NEXT:    s_waitcnt vmcnt(0)
 ; GFX6-NEXT:    v_madak_f32 v2, v2, v3, 0x41200000
-; GFX6-NEXT:    buffer_store_dword v2, v[0:1], s[0:3], 0 addr64
+; GFX6-NEXT:    buffer_store_dword v2, v[4:5], s[0:3], 0 addr64
 ; GFX6-NEXT:    s_endpgm
 ;
 ; GFX8-LABEL: madak_f32_contract:
@@ -1490,13 +1490,13 @@ define amdgpu_kernel void @madak_f32_contract(ptr addrspace(1) noalias %out, ptr
 ; GFX9:       ; %bb.0:
 ; GFX9-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x24
 ; GFX9-NEXT:    s_load_dwordx2 s[6:7], s[4:5], 0x34
-; GFX9-NEXT:    v_lshlrev_b32_e32 v0, 2, v0
+; GFX9-NEXT:    v_lshlrev_b32_e32 v3, 2, v0
 ; GFX9-NEXT:    s_waitcnt lgkmcnt(0)
-; GFX9-NEXT:    global_load_dword v1, v0, s[2:3]
-; GFX9-NEXT:    global_load_dword v2, v0, s[6:7]
+; GFX9-NEXT:    global_load_dword v1, v3, s[2:3]
+; GFX9-NEXT:    global_load_dword v2, v3, s[6:7]
 ; GFX9-NEXT:    s_waitcnt vmcnt(0)
 ; GFX9-NEXT:    v_madak_f32 v1, v1, v2, 0x41200000
-; GFX9-NEXT:    global_store_dword v0, v1, s[0:1]
+; GFX9-NEXT:    global_store_dword v3, v1, s[0:1]
 ; GFX9-NEXT:    s_endpgm
 ;
 ; GFX942-LABEL: madak_f32_contract:
@@ -1504,13 +1504,13 @@ define amdgpu_kernel void @madak_f32_contract(ptr addrspace(1) noalias %out, ptr
 ; GFX942-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x24
 ; GFX942-NEXT:    s_load_dwordx2 s[6:7], s[4:5], 0x34
 ; GFX942-NEXT:    v_and_b32_e32 v0, 0x3ff, v0
-; GFX942-NEXT:    v_lshlrev_b32_e32 v0, 2, v0
+; GFX942-NEXT:    v_lshlrev_b32_e32 v3, 2, v0
 ; GFX942-NEXT:    s_waitcnt lgkmcnt(0)
-; GFX942-NEXT:    global_load_dword v1, v0, s[2:3]
-; GFX942-NEXT:    global_load_dword v2, v0, s[6:7]
+; GFX942-NEXT:    global_load_dword v1, v3, s[2:3]
+; GFX942-NEXT:    global_load_dword v2, v3, s[6:7]
 ; GFX942-NEXT:    s_waitcnt vmcnt(0)
 ; GFX942-NEXT:    v_fmaak_f32 v1, v1, v2, 0x41200000
-; GFX942-NEXT:    global_store_dword v0, v1, s[0:1]
+; GFX942-NEXT:    global_store_dword v3, v1, s[0:1]
 ; GFX942-NEXT:    s_endpgm
 ;
 ; GFX10-MAD-LABEL: madak_f32_contract:
@@ -1518,14 +1518,14 @@ define amdgpu_kernel void @madak_f32_contract(ptr addrspace(1) noalias %out, ptr
 ; GFX10-MAD-NEXT:    s_clause 0x1
 ; GFX10-MAD-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x24
 ; GFX10-MAD-NEXT:    s_load_dwordx2 s[6:7], s[4:5], 0x34
-; GFX10-MAD-NEXT:    v_lshlrev_b32_e32 v0, 2, v0
+; GFX10-MAD-NEXT:    v_lshlrev_b32_e32 v3, 2, v0
 ; GFX10-MAD-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX10-MAD-NEXT:    s_clause 0x1
-; GFX10-MAD-NEXT:    global_load_dword v1, v0, s[2:3]
-; GFX10-MAD-NEXT:    global_load_dword v2, v0, s[6:7]
+; GFX10-MAD-NEXT:    global_load_dword v1, v3, s[2:3]
+; GFX10-MAD-NEXT:    global_load_dword v2, v3, s[6:7]
 ; GFX10-MAD-NEXT:    s_waitcnt vmcnt(0)
 ; GFX10-MAD-NEXT:    v_fmaak_f32 v1, v1, v2, 0x41200000
-; GFX10-MAD-NEXT:    global_store_dword v0, v1, s[0:1]
+; GFX10-MAD-NEXT:    global_store_dword v3, v1, s[0:1]
 ; GFX10-MAD-NEXT:    s_endpgm
 ;
 ; GFX11-MAD-LABEL: madak_f32_contract:
@@ -1535,14 +1535,14 @@ define amdgpu_kernel void @madak_f32_contract(ptr addrspace(1) noalias %out, ptr
 ; GFX11-MAD-NEXT:    s_load_b64 s[4:5], s[4:5], 0x34
 ; GFX11-MAD-NEXT:    v_and_b32_e32 v0, 0x3ff, v0
 ; GFX11-MAD-NEXT:    s_delay_alu instid0(VALU_DEP_1)
-; GFX11-MAD-NEXT:    v_lshlrev_b32_e32 v0, 2, v0
+; GFX11-MAD-NEXT:    v_lshlrev_b32_e32 v3, 2, v0
 ; GFX11-MAD-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX11-MAD-NEXT:    s_clause 0x1
-; GFX11-MAD-NEXT:    global_load_b32 v1, v0, s[2:3]
-; GFX11-MAD-NEXT:    global_load_b32 v2, v0, s[4:5]
+; GFX11-MAD-NEXT:    global_load_b32 v1, v3, s[2:3]
+; GFX11-MAD-NEXT:    global_load_b32 v2, v3, s[4:5]
 ; GFX11-MAD-NEXT:    s_waitcnt vmcnt(0)
 ; GFX11-MAD-NEXT:    v_fmaak_f32 v1, v1, v2, 0x41200000
-; GFX11-MAD-NEXT:    global_store_b32 v0, v1, s[0:1]
+; GFX11-MAD-NEXT:    global_store_b32 v3, v1, s[0:1]
 ; GFX11-MAD-NEXT:    s_endpgm
   %tid = tail call i32 @llvm.amdgcn.workitem.id.x() nounwind readnone
   %in.a.gep = getelementptr float, ptr addrspace(1) %in.a, i32 %tid
@@ -1566,17 +1566,17 @@ define amdgpu_kernel void @madmk_f32_contract(ptr addrspace(1) noalias %out, ptr
 ; GFX6-NEXT:    s_load_dwordx2 s[8:9], s[4:5], 0xd
 ; GFX6-NEXT:    s_mov_b32 s7, 0xf000
 ; GFX6-NEXT:    s_mov_b32 s6, 0
-; GFX6-NEXT:    v_lshlrev_b32_e32 v0, 2, v0
+; GFX6-NEXT:    v_lshlrev_b32_e32 v4, 2, v0
 ; GFX6-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX6-NEXT:    s_mov_b64 s[4:5], s[2:3]
-; GFX6-NEXT:    v_mov_b32_e32 v1, 0
+; GFX6-NEXT:    v_mov_b32_e32 v5, 0
 ; GFX6-NEXT:    s_mov_b64 s[10:11], s[6:7]
-; GFX6-NEXT:    buffer_load_dword v2, v[0:1], s[4:7], 0 addr64
-; GFX6-NEXT:    buffer_load_dword v3, v[0:1], s[8:11], 0 addr64
+; GFX6-NEXT:    buffer_load_dword v2, v[4:5], s[4:7], 0 addr64
+; GFX6-NEXT:    buffer_load_dword v3, v[4:5], s[8:11], 0 addr64
 ; GFX6-NEXT:    s_mov_b64 s[2:3], s[6:7]
 ; GFX6-NEXT:    s_waitcnt vmcnt(0)
 ; GFX6-NEXT:    v_madmk_f32 v2, v2, 0x41200000, v3
-; GFX6-NEXT:    buffer_store_dword v2, v[0:1], s[0:3], 0 addr64
+; GFX6-NEXT:    buffer_store_dword v2, v[4:5], s[0:3], 0 addr64
 ; GFX6-NEXT:    s_endpgm
 ;
 ; GFX8-LABEL: madmk_f32_contract:
@@ -1605,13 +1605,13 @@ define amdgpu_kernel void @madmk_f32_contract(ptr addrspace(1) noalias %out, ptr
 ; GFX9:       ; %bb.0:
 ; GFX9-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x24
 ; GFX9-NEXT:    s_load_dwordx2 s[6:7], s[4:5], 0x34
-; GFX9-NEXT:    v_lshlrev_b32_e32 v0, 2, v0
+; GFX9-NEXT:    v_lshlrev_b32_e32 v3, 2, v0
 ; GFX9-NEXT:    s_waitcnt lgkmcnt(0)
-; GFX9-NEXT:    global_load_dword v1, v0, s[2:3]
-; GFX9-NEXT:    global_load_dword v2, v0, s[6:7]
+; GFX9-NEXT:    global_load_dword v1, v3, s[2:3]
+; GFX9-NEXT:    global_load_dword v2, v3, s[6:7]
 ; GFX9-NEXT:    s_waitcnt vmcnt(0)
 ; GFX9-NEXT:    v_madmk_f32 v1, v1, 0x41200000, v2
-; GFX9-NEXT:    global_store_dword v0, v1, s[0:1]
+; GFX9-NEXT:    global_store_dword v3, v1, s[0:1]
 ; GFX9-NEXT:    s_endpgm
 ;
 ; GFX942-LABEL: madmk_f32_contract:
@@ -1619,13 +1619,13 @@ define amdgpu_kernel void @madmk_f32_contract(ptr addrspace(1) noalias %out, ptr
 ; GFX942-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x24
 ; GFX942-NEXT:    s_load_dwordx2 s[6:7], s[4:5], 0x34
 ; GFX942-NEXT:    v_and_b32_e32 v0, 0x3ff, v0
-; GFX942-NEXT:    v_lshlrev_b32_e32 v0, 2, v0
+; GFX942-NEXT:    v_lshlrev_b32_e32 v3, 2, v0
 ; GFX942-NEXT:    s_waitcnt lgkmcnt(0)
-; GFX942-NEXT:    global_load_dword v1, v0, s[2:3]
-; GFX942-NEXT:    global_load_dword v2, v0, s[6:7]
+; GFX942-NEXT:    global_load_dword v1, v3, s[2:3]
+; GFX942-NEXT:    global_load_dword v2, v3, s[6:7]
 ; GFX942-NEXT:    s_waitcnt vmcnt(0)
 ; GFX942-NEXT:    v_fmamk_f32 v1, v1, 0x41200000, v2
-; GFX942-NEXT:    global_store_dword v0, v1, s[0:1]
+; GFX942-NEXT:    global_store_dword v3, v1, s[0:1]
 ; GFX942-NEXT:    s_endpgm
 ;
 ; GFX10-MAD-LABEL: madmk_f32_contract:
@@ -1633,14 +1633,14 @@ define amdgpu_kernel void @madmk_f32_contract(ptr addrspace(1) noalias %out, ptr
 ; GFX10-MAD-NEXT:    s_clause 0x1
 ; GFX10-MAD-NEXT:    s_load_dwordx4 s[0:3], s[4:5], 0x24
 ; GFX10-MAD-NEXT:    s_load_dwordx2 s[6:7], s[4:5], 0x34
-; GFX10-MAD-NEXT:    v_lshlrev_b32_e32 v0, 2, v0
+; GFX10-MAD-NEXT:    v_lshlrev_b32_e32 v3, 2, v0
 ; GFX10-MAD-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX10-MAD-NEXT:    s_clause 0x1
-; GFX10-MAD-NEXT:    global_load_dword v1, v0, s[2:3]
-; GFX10-MAD-NEXT:    global_load_dword v2, v0, s[6:7]
+; GFX10-MAD-NEXT:    global_load_dword v1, v3, s[2:3]
+; GFX10-MAD-NEXT:    global_load_dword v2, v3, s[6:7]
 ; GFX10-MAD-NEXT:    s_waitcnt vmcnt(0)
 ; GFX10-MAD-NEXT:    v_fmamk_f32 v1, v1, 0x41200000, v2
-; GFX10-MAD-NEXT:    global_store_dword v0, v1, s[0:1]
+; GFX10-MAD-NEXT:    global_store_dword v3, v1, s[0:1]
 ; GFX10-MAD-NEXT:    s_endpgm
 ;
 ; GFX11-MAD-LABEL: madmk_f32_contract:
@@ -1650,14 +1650,14 @@ define amdgpu_kernel void @madmk_f32_contract(ptr addrspace(1) noalias %out, ptr
 ; GFX11-MAD-NEXT:    s_load_b64 s[4:5], s[4:5], 0x34
 ; GFX11-MAD-NEXT:    v_and_b32_e32 v0, 0x3ff, v0
 ; GFX11-MAD-NEXT:    s_delay_alu instid0(VALU_DEP_1)
-; GFX11-MAD-NEXT:    v_lshlrev_b32_e32 v0, 2, v0
+; GFX11-MAD-NEXT:    v_lshlrev_b32_e32 v3, 2, v0
 ; GFX11-MAD-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX11-MAD-NEXT:    s_clause 0x1
-; GFX11-MAD-NEXT:    global_load_b32 v1, v0, s[2:3]
-; GFX11-MAD-NEXT:    global_load_b32 v2, v0, s[4:5]
+; GFX11-MAD-NEXT:    global_load_b32 v1, v3, s[2:3]
+; GFX11-MAD-NEXT:    global_load_b32 v2, v3, s[4:5]
 ; GFX11-MAD-NEXT:    s_waitcnt vmcnt(0)
 ; GFX11-MAD-NEXT:    v_fmamk_f32 v1, v1, 0x41200000, v2
-; GFX11-MAD-NEXT:    global_store_b32 v0, v1, s[0:1]
+; GFX11-MAD-NEXT:    global_store_b32 v3, v1, s[0:1]
 ; GFX11-MAD-NEXT:    s_endpgm
   %tid = tail call i32 @llvm.amdgcn.workitem.id.x() nounwind readnone
   %in.a.gep = getelementptr float, ptr addrspace(1) %in.a, i32 %tid
