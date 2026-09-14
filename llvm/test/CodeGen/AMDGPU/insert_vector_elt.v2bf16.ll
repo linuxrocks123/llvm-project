@@ -2321,11 +2321,11 @@ define amdgpu_kernel void @v_insertelement_v16bf16_dynamic(ptr addrspace(1) %out
 ; GFX1250-REAL16-NEXT:    s_wait_xcnt 0x0
 ; GFX1250-REAL16-NEXT:    s_load_b64 s[4:5], s[4:5], 0x10 nv
 ; GFX1250-REAL16-NEXT:    s_delay_alu instid0(VALU_DEP_1)
-; GFX1250-REAL16-NEXT:    v_lshlrev_b32_e32 v17, 5, v0
+; GFX1250-REAL16-NEXT:    v_lshlrev_b32_e32 v9, 5, v0
 ; GFX1250-REAL16-NEXT:    s_wait_kmcnt 0x0
 ; GFX1250-REAL16-NEXT:    s_clause 0x1
-; GFX1250-REAL16-NEXT:    global_load_b128 v[0:3], v17, s[2:3]
-; GFX1250-REAL16-NEXT:    global_load_b128 v[4:7], v17, s[2:3] offset:16
+; GFX1250-REAL16-NEXT:    global_load_b128 v[0:3], v9, s[2:3]
+; GFX1250-REAL16-NEXT:    global_load_b128 v[4:7], v9, s[2:3] offset:16
 ; GFX1250-REAL16-NEXT:    s_cmp_eq_u32 s5, 6
 ; GFX1250-REAL16-NEXT:    s_wait_xcnt 0x0
 ; GFX1250-REAL16-NEXT:    s_cselect_b32 s2, -1, 0
@@ -2378,8 +2378,8 @@ define amdgpu_kernel void @v_insertelement_v16bf16_dynamic(ptr addrspace(1) %out
 ; GFX1250-REAL16-NEXT:    v_cndmask_b16 v0.l, v0.l, s4, s10
 ; GFX1250-REAL16-NEXT:    v_cndmask_b16 v0.h, v0.h, s4, s11
 ; GFX1250-REAL16-NEXT:    s_clause 0x1
-; GFX1250-REAL16-NEXT:    global_store_b128 v17, v[0:3], s[0:1] offset:16
-; GFX1250-REAL16-NEXT:    global_store_b128 v17, v[8:11], s[0:1]
+; GFX1250-REAL16-NEXT:    global_store_b128 v9, v[4:7], s[0:1] offset:16
+; GFX1250-REAL16-NEXT:    global_store_b128 v9, v[0:3], s[0:1]
 ; GFX1250-REAL16-NEXT:    s_endpgm
   %tid = call i32 @llvm.amdgcn.workitem.id.x() #1
   %tid.ext = sext i32 %tid to i64

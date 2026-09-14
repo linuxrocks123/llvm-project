@@ -498,15 +498,15 @@ define void @v_constained_fma_f16_fpexcept_strict_fneg_uni(half inreg %x, half i
 ; GFX900-NEXT:    s_waitcnt vmcnt(0)
 ; GFX900-NEXT:    s_setpc_b64 s[30:31]
 ;
-; GFX942-LABEL: v_constained_fma_f16_fpexcept_strict_fneg_uni:
-; GFX942:       ; %bb.0:
-; GFX942-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; GFX942-NEXT:    v_mov_b32_e32 v2, s0
-; GFX942-NEXT:    v_mov_b32_e32 v3, s1
-; GFX942-NEXT:    v_fma_f16 v2, v2, v3, -s2
-; GFX942-NEXT:    global_store_short v[0:1], v2, off
-; GFX942-NEXT:    s_waitcnt vmcnt(0)
-; GFX942-NEXT:    s_setpc_b64 s[30:31]
+; GFX11-TRUE16-LABEL: v_constained_fma_v4f16_fpexcept_strict:
+; GFX11-TRUE16:       ; %bb.0:
+; GFX11-TRUE16-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX11-TRUE16-NEXT:    v_fma_f16 v5.l, v1.l, v3.l, v5.l
+; GFX11-TRUE16-NEXT:    v_fma_f16 v4.l, v0.l, v2.l, v4.l
+; GFX11-TRUE16-NEXT:    v_fmac_f16_e32 v4.h, v0.h, v2.h
+; GFX11-TRUE16-NEXT:    v_fmac_f16_e32 v5.h, v1.h, v3.h
+; GFX11-TRUE16-NEXT:    v_dual_mov_b32 v0, v4 :: v_dual_mov_b32 v1, v5
+; GFX11-TRUE16-NEXT:    s_setpc_b64 s[30:31]
 ;
 ; GFX11-LABEL: v_constained_fma_f16_fpexcept_strict_fneg_uni:
 ; GFX11:       ; %bb.0:
