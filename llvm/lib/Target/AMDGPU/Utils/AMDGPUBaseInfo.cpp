@@ -3685,8 +3685,9 @@ bool supportsScaleOffset(const MCInstrInfo &MII, unsigned Opcode) {
   return false;
 }
 
-bool hasAny64BitVGPROperands(const MCInstrDesc &OpDesc, const MCInstrInfo &MII,
-                             const MCSubtargetInfo &ST) {
+static bool hasAny64BitVGPROperands(const MCInstrDesc &OpDesc,
+                                    const MCInstrInfo &MII,
+                                    const MCSubtargetInfo &ST) {
   for (auto OpName : {OpName::vdst, OpName::src0, OpName::src1, OpName::src2}) {
     int Idx = getNamedOperandIdx(OpDesc.getOpcode(), OpName);
     if (Idx == -1)
@@ -3725,11 +3726,8 @@ bool isDPALU_DPP32BitOpc(unsigned Opc) {
 
 bool isDPALU_DPP(const MCInstrDesc &OpDesc, const MCInstrInfo &MII,
                  const MCSubtargetInfo &ST) {
-  if (!ST.hasFeature(AMDGPU::FeatureDPALU_DPP))
-    return false;
-
   if (isDPALU_DPP32BitOpc(OpDesc.getOpcode()))
-    return ST.hasFeature(AMDGPU::FeatureGFX1250Insts);
+    return true;
 
   return hasAny64BitVGPROperands(OpDesc, MII, ST);
 }
