@@ -12413,7 +12413,6 @@ define void @memmove_p5_p5_sz2048(ptr addrspace(5) align 1 %dst, ptr addrspace(5
 ; UNROLL3-NEXT:    s_waitcnt vmcnt(0)
 ; UNROLL3-NEXT:    buffer_store_dword v6, v0, s[0:3], 0 offen offset:2032
 ; UNROLL3-NEXT:    ; implicit-def: $vgpr0
-; UNROLL3-NEXT:    ; implicit-def: $vgpr1
 ; UNROLL3-NEXT:  .LBB8_4: ; %Flow16
 ; UNROLL3-NEXT:    s_andn2_saveexec_b32 s6, s6
 ; UNROLL3-NEXT:    s_cbranch_execz .LBB8_7
