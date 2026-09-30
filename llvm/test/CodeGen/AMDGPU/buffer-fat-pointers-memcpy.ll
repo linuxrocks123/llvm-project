@@ -1148,7 +1148,7 @@ define amdgpu_kernel void @memcpy_known_small(ptr addrspace(7) %src, ptr addrspa
 ; SDAG-GFX1100-NEXT:    s_mov_b32 s6, s11
 ; SDAG-GFX1100-NEXT:    s_waitcnt vmcnt(0)
 ; SDAG-GFX1100-NEXT:    buffer_store_b128 v[0:3], v5, s[4:7], 0 offen
-; SDAG-GFX1100-NEXT:    buffer_load_b128 v[6:9], v4, s[8:11], 0 offen offset:16
+; SDAG-GFX1100-NEXT:    buffer_load_b128 v[6:9], v4, s[0:3], 0 offen offset:16
 ; SDAG-GFX1100-NEXT:    s_waitcnt vmcnt(0)
 ; SDAG-GFX1100-NEXT:    buffer_store_b128 v[6:9], v5, s[4:7], 0 offen offset:16
 ; SDAG-GFX1100-NEXT:    s_endpgm
@@ -1198,7 +1198,7 @@ define amdgpu_kernel void @memcpy_known_small(ptr addrspace(7) %src, ptr addrspa
 ; GISEL-GFX1100-NEXT:    s_mov_b32 s6, s11
 ; GISEL-GFX1100-NEXT:    s_waitcnt vmcnt(0)
 ; GISEL-GFX1100-NEXT:    buffer_store_b128 v[0:3], v5, s[4:7], 0 offen
-; GISEL-GFX1100-NEXT:    buffer_load_b128 v[6:9], v4, s[8:11], 0 offen offset:16
+; GISEL-GFX1100-NEXT:    buffer_load_b128 v[6:9], v4, s[0:3], 0 offen offset:16
 ; GISEL-GFX1100-NEXT:    s_waitcnt vmcnt(0)
 ; GISEL-GFX1100-NEXT:    buffer_store_b128 v[6:9], v5, s[4:7], 0 offen offset:16
 ; GISEL-GFX1100-NEXT:    s_endpgm

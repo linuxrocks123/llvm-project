@@ -100,10 +100,12 @@ define amdgpu_ps float @ps_main(i32 %idx) {
 ; SI-NEXT:    buffer_load_dword v0, v17, s[4:7], 0 offen
 ; SI-NEXT:    v_mov_b32_e32 v17, 0x3f20e7f4
 ; SI-NEXT:    v_mov_b32_e32 v18, 0x3f3d349c
-; SI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:832
-; SI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:828
-; SI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:824
-; SI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:820
+; SI-NEXT:    v_add_i32_e32 v19, vcc, 0x200, v0
+; SI-NEXT:    buffer_load_dword v0, v0, s[0:3], 0 offen
+; SI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:832
+; SI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:828
+; SI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:824
+; SI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:820
 ; SI-NEXT:    s_waitcnt expcnt(3)
 ; SI-NEXT:    v_mov_b32_e32 v17, 0x3703c499
 ; SI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:796
@@ -124,21 +126,21 @@ define amdgpu_ps float @ps_main(i32 %idx) {
 ; SI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:764
 ; SI-NEXT:    s_waitcnt expcnt(0)
 ; SI-NEXT:    v_mov_b32_e32 v5, 0xbf5f2ee2
-; SI-NEXT:    buffer_store_dword v5, off, s[4:7], 0 offset:760
-; SI-NEXT:    buffer_store_dword v4, off, s[4:7], 0 offset:756
-; SI-NEXT:    buffer_store_dword v18, off, s[4:7], 0 offset:752
-; SI-NEXT:    buffer_store_dword v3, off, s[4:7], 0 offset:748
-; SI-NEXT:    buffer_store_dword v13, off, s[4:7], 0 offset:744
-; SI-NEXT:    buffer_store_dword v14, off, s[4:7], 0 offset:740
-; SI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:736
-; SI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:732
-; SI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:728
-; SI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:724
-; SI-NEXT:    buffer_store_dword v8, off, s[4:7], 0 offset:720
-; SI-NEXT:    buffer_store_dword v7, off, s[4:7], 0 offset:716
-; SI-NEXT:    buffer_store_dword v2, off, s[4:7], 0 offset:712
-; SI-NEXT:    buffer_store_dword v12, off, s[4:7], 0 offset:708
-; SI-NEXT:    buffer_load_dword v1, v19, s[4:7], 0 offen
+; SI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:760
+; SI-NEXT:    buffer_store_dword v4, off, s[0:3], 0 offset:756
+; SI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:752
+; SI-NEXT:    buffer_store_dword v3, off, s[0:3], 0 offset:748
+; SI-NEXT:    buffer_store_dword v13, off, s[0:3], 0 offset:744
+; SI-NEXT:    buffer_store_dword v14, off, s[0:3], 0 offset:740
+; SI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:736
+; SI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:732
+; SI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:728
+; SI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:724
+; SI-NEXT:    buffer_store_dword v8, off, s[0:3], 0 offset:720
+; SI-NEXT:    buffer_store_dword v7, off, s[0:3], 0 offset:716
+; SI-NEXT:    buffer_store_dword v2, off, s[0:3], 0 offset:712
+; SI-NEXT:    buffer_store_dword v12, off, s[0:3], 0 offset:708
+; SI-NEXT:    buffer_load_dword v1, v19, s[0:3], 0 offen
 ; SI-NEXT:    s_waitcnt vmcnt(0)
 ; SI-NEXT:    v_add_f32_e32 v0, v0, v1
 ; SI-NEXT:    s_waitcnt expcnt(0)
@@ -215,10 +217,12 @@ define amdgpu_ps float @ps_main(i32 %idx) {
 ; VI-NEXT:    buffer_load_dword v0, v17, s[4:7], 0 offen
 ; VI-NEXT:    v_mov_b32_e32 v17, 0x3f20e7f4
 ; VI-NEXT:    v_mov_b32_e32 v18, 0x3f3d349c
-; VI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:832
-; VI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:828
-; VI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:824
-; VI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:820
+; VI-NEXT:    v_add_u32_e32 v19, vcc, 0x200, v0
+; VI-NEXT:    buffer_load_dword v0, v0, s[0:3], 0 offen
+; VI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:832
+; VI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:828
+; VI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:824
+; VI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:820
 ; VI-NEXT:    v_mov_b32_e32 v17, 0x3703c499
 ; VI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:796
 ; VI-NEXT:    buffer_store_dword v13, off, s[0:3], 0 offset:792
@@ -236,21 +240,21 @@ define amdgpu_ps float @ps_main(i32 %idx) {
 ; VI-NEXT:    buffer_store_dword v16, off, s[0:3], 0 offset:768
 ; VI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:764
 ; VI-NEXT:    v_mov_b32_e32 v5, 0xbf5f2ee2
-; VI-NEXT:    buffer_store_dword v5, off, s[4:7], 0 offset:760
-; VI-NEXT:    buffer_store_dword v4, off, s[4:7], 0 offset:756
-; VI-NEXT:    buffer_store_dword v18, off, s[4:7], 0 offset:752
-; VI-NEXT:    buffer_store_dword v3, off, s[4:7], 0 offset:748
-; VI-NEXT:    buffer_store_dword v13, off, s[4:7], 0 offset:744
-; VI-NEXT:    buffer_store_dword v14, off, s[4:7], 0 offset:740
-; VI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:736
-; VI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:732
-; VI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:728
-; VI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:724
-; VI-NEXT:    buffer_store_dword v8, off, s[4:7], 0 offset:720
-; VI-NEXT:    buffer_store_dword v7, off, s[4:7], 0 offset:716
-; VI-NEXT:    buffer_store_dword v2, off, s[4:7], 0 offset:712
-; VI-NEXT:    buffer_store_dword v12, off, s[4:7], 0 offset:708
-; VI-NEXT:    buffer_load_dword v1, v19, s[4:7], 0 offen
+; VI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:760
+; VI-NEXT:    buffer_store_dword v4, off, s[0:3], 0 offset:756
+; VI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:752
+; VI-NEXT:    buffer_store_dword v3, off, s[0:3], 0 offset:748
+; VI-NEXT:    buffer_store_dword v13, off, s[0:3], 0 offset:744
+; VI-NEXT:    buffer_store_dword v14, off, s[0:3], 0 offset:740
+; VI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:736
+; VI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:732
+; VI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:728
+; VI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:724
+; VI-NEXT:    buffer_store_dword v8, off, s[0:3], 0 offset:720
+; VI-NEXT:    buffer_store_dword v7, off, s[0:3], 0 offset:716
+; VI-NEXT:    buffer_store_dword v2, off, s[0:3], 0 offset:712
+; VI-NEXT:    buffer_store_dword v12, off, s[0:3], 0 offset:708
+; VI-NEXT:    buffer_load_dword v1, v19, s[0:3], 0 offen
 ; VI-NEXT:    s_waitcnt vmcnt(0)
 ; VI-NEXT:    v_add_f32_e32 v0, v0, v1
 ; VI-NEXT:    ; return to shader part epilog
@@ -1105,10 +1109,12 @@ define amdgpu_vs float @vs_main(i32 %idx) {
 ; SI-NEXT:    buffer_load_dword v0, v17, s[4:7], 0 offen
 ; SI-NEXT:    v_mov_b32_e32 v17, 0x3f20e7f4
 ; SI-NEXT:    v_mov_b32_e32 v18, 0x3f3d349c
-; SI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:832
-; SI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:828
-; SI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:824
-; SI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:820
+; SI-NEXT:    v_add_i32_e32 v19, vcc, 0x200, v0
+; SI-NEXT:    buffer_load_dword v0, v0, s[0:3], 0 offen
+; SI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:832
+; SI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:828
+; SI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:824
+; SI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:820
 ; SI-NEXT:    s_waitcnt expcnt(3)
 ; SI-NEXT:    v_mov_b32_e32 v17, 0x3703c499
 ; SI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:796
@@ -1129,21 +1135,21 @@ define amdgpu_vs float @vs_main(i32 %idx) {
 ; SI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:764
 ; SI-NEXT:    s_waitcnt expcnt(0)
 ; SI-NEXT:    v_mov_b32_e32 v5, 0xbf5f2ee2
-; SI-NEXT:    buffer_store_dword v5, off, s[4:7], 0 offset:760
-; SI-NEXT:    buffer_store_dword v4, off, s[4:7], 0 offset:756
-; SI-NEXT:    buffer_store_dword v18, off, s[4:7], 0 offset:752
-; SI-NEXT:    buffer_store_dword v3, off, s[4:7], 0 offset:748
-; SI-NEXT:    buffer_store_dword v13, off, s[4:7], 0 offset:744
-; SI-NEXT:    buffer_store_dword v14, off, s[4:7], 0 offset:740
-; SI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:736
-; SI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:732
-; SI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:728
-; SI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:724
-; SI-NEXT:    buffer_store_dword v8, off, s[4:7], 0 offset:720
-; SI-NEXT:    buffer_store_dword v7, off, s[4:7], 0 offset:716
-; SI-NEXT:    buffer_store_dword v2, off, s[4:7], 0 offset:712
-; SI-NEXT:    buffer_store_dword v12, off, s[4:7], 0 offset:708
-; SI-NEXT:    buffer_load_dword v1, v19, s[4:7], 0 offen
+; SI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:760
+; SI-NEXT:    buffer_store_dword v4, off, s[0:3], 0 offset:756
+; SI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:752
+; SI-NEXT:    buffer_store_dword v3, off, s[0:3], 0 offset:748
+; SI-NEXT:    buffer_store_dword v13, off, s[0:3], 0 offset:744
+; SI-NEXT:    buffer_store_dword v14, off, s[0:3], 0 offset:740
+; SI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:736
+; SI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:732
+; SI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:728
+; SI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:724
+; SI-NEXT:    buffer_store_dword v8, off, s[0:3], 0 offset:720
+; SI-NEXT:    buffer_store_dword v7, off, s[0:3], 0 offset:716
+; SI-NEXT:    buffer_store_dword v2, off, s[0:3], 0 offset:712
+; SI-NEXT:    buffer_store_dword v12, off, s[0:3], 0 offset:708
+; SI-NEXT:    buffer_load_dword v1, v19, s[0:3], 0 offen
 ; SI-NEXT:    s_waitcnt vmcnt(0)
 ; SI-NEXT:    v_add_f32_e32 v0, v0, v1
 ; SI-NEXT:    s_waitcnt expcnt(0)
@@ -1220,10 +1226,12 @@ define amdgpu_vs float @vs_main(i32 %idx) {
 ; VI-NEXT:    buffer_load_dword v0, v17, s[4:7], 0 offen
 ; VI-NEXT:    v_mov_b32_e32 v17, 0x3f20e7f4
 ; VI-NEXT:    v_mov_b32_e32 v18, 0x3f3d349c
-; VI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:832
-; VI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:828
-; VI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:824
-; VI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:820
+; VI-NEXT:    v_add_u32_e32 v19, vcc, 0x200, v0
+; VI-NEXT:    buffer_load_dword v0, v0, s[0:3], 0 offen
+; VI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:832
+; VI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:828
+; VI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:824
+; VI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:820
 ; VI-NEXT:    v_mov_b32_e32 v17, 0x3703c499
 ; VI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:796
 ; VI-NEXT:    buffer_store_dword v13, off, s[0:3], 0 offset:792
@@ -1241,21 +1249,21 @@ define amdgpu_vs float @vs_main(i32 %idx) {
 ; VI-NEXT:    buffer_store_dword v16, off, s[0:3], 0 offset:768
 ; VI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:764
 ; VI-NEXT:    v_mov_b32_e32 v5, 0xbf5f2ee2
-; VI-NEXT:    buffer_store_dword v5, off, s[4:7], 0 offset:760
-; VI-NEXT:    buffer_store_dword v4, off, s[4:7], 0 offset:756
-; VI-NEXT:    buffer_store_dword v18, off, s[4:7], 0 offset:752
-; VI-NEXT:    buffer_store_dword v3, off, s[4:7], 0 offset:748
-; VI-NEXT:    buffer_store_dword v13, off, s[4:7], 0 offset:744
-; VI-NEXT:    buffer_store_dword v14, off, s[4:7], 0 offset:740
-; VI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:736
-; VI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:732
-; VI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:728
-; VI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:724
-; VI-NEXT:    buffer_store_dword v8, off, s[4:7], 0 offset:720
-; VI-NEXT:    buffer_store_dword v7, off, s[4:7], 0 offset:716
-; VI-NEXT:    buffer_store_dword v2, off, s[4:7], 0 offset:712
-; VI-NEXT:    buffer_store_dword v12, off, s[4:7], 0 offset:708
-; VI-NEXT:    buffer_load_dword v1, v19, s[4:7], 0 offen
+; VI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:760
+; VI-NEXT:    buffer_store_dword v4, off, s[0:3], 0 offset:756
+; VI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:752
+; VI-NEXT:    buffer_store_dword v3, off, s[0:3], 0 offset:748
+; VI-NEXT:    buffer_store_dword v13, off, s[0:3], 0 offset:744
+; VI-NEXT:    buffer_store_dword v14, off, s[0:3], 0 offset:740
+; VI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:736
+; VI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:732
+; VI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:728
+; VI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:724
+; VI-NEXT:    buffer_store_dword v8, off, s[0:3], 0 offset:720
+; VI-NEXT:    buffer_store_dword v7, off, s[0:3], 0 offset:716
+; VI-NEXT:    buffer_store_dword v2, off, s[0:3], 0 offset:712
+; VI-NEXT:    buffer_store_dword v12, off, s[0:3], 0 offset:708
+; VI-NEXT:    buffer_load_dword v1, v19, s[0:3], 0 offen
 ; VI-NEXT:    s_waitcnt vmcnt(0)
 ; VI-NEXT:    v_add_f32_e32 v0, v0, v1
 ; VI-NEXT:    ; return to shader part epilog
@@ -2110,10 +2118,12 @@ define amdgpu_cs float @cs_main(i32 %idx) {
 ; SI-NEXT:    buffer_load_dword v0, v17, s[4:7], 0 offen
 ; SI-NEXT:    v_mov_b32_e32 v17, 0x3f20e7f4
 ; SI-NEXT:    v_mov_b32_e32 v18, 0x3f3d349c
-; SI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:832
-; SI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:828
-; SI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:824
-; SI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:820
+; SI-NEXT:    v_add_i32_e32 v19, vcc, 0x200, v0
+; SI-NEXT:    buffer_load_dword v0, v0, s[0:3], 0 offen
+; SI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:832
+; SI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:828
+; SI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:824
+; SI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:820
 ; SI-NEXT:    s_waitcnt expcnt(3)
 ; SI-NEXT:    v_mov_b32_e32 v17, 0x3703c499
 ; SI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:796
@@ -2134,21 +2144,21 @@ define amdgpu_cs float @cs_main(i32 %idx) {
 ; SI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:764
 ; SI-NEXT:    s_waitcnt expcnt(0)
 ; SI-NEXT:    v_mov_b32_e32 v5, 0xbf5f2ee2
-; SI-NEXT:    buffer_store_dword v5, off, s[4:7], 0 offset:760
-; SI-NEXT:    buffer_store_dword v4, off, s[4:7], 0 offset:756
-; SI-NEXT:    buffer_store_dword v18, off, s[4:7], 0 offset:752
-; SI-NEXT:    buffer_store_dword v3, off, s[4:7], 0 offset:748
-; SI-NEXT:    buffer_store_dword v13, off, s[4:7], 0 offset:744
-; SI-NEXT:    buffer_store_dword v14, off, s[4:7], 0 offset:740
-; SI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:736
-; SI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:732
-; SI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:728
-; SI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:724
-; SI-NEXT:    buffer_store_dword v8, off, s[4:7], 0 offset:720
-; SI-NEXT:    buffer_store_dword v7, off, s[4:7], 0 offset:716
-; SI-NEXT:    buffer_store_dword v2, off, s[4:7], 0 offset:712
-; SI-NEXT:    buffer_store_dword v12, off, s[4:7], 0 offset:708
-; SI-NEXT:    buffer_load_dword v1, v19, s[4:7], 0 offen
+; SI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:760
+; SI-NEXT:    buffer_store_dword v4, off, s[0:3], 0 offset:756
+; SI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:752
+; SI-NEXT:    buffer_store_dword v3, off, s[0:3], 0 offset:748
+; SI-NEXT:    buffer_store_dword v13, off, s[0:3], 0 offset:744
+; SI-NEXT:    buffer_store_dword v14, off, s[0:3], 0 offset:740
+; SI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:736
+; SI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:732
+; SI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:728
+; SI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:724
+; SI-NEXT:    buffer_store_dword v8, off, s[0:3], 0 offset:720
+; SI-NEXT:    buffer_store_dword v7, off, s[0:3], 0 offset:716
+; SI-NEXT:    buffer_store_dword v2, off, s[0:3], 0 offset:712
+; SI-NEXT:    buffer_store_dword v12, off, s[0:3], 0 offset:708
+; SI-NEXT:    buffer_load_dword v1, v19, s[0:3], 0 offen
 ; SI-NEXT:    s_waitcnt vmcnt(0)
 ; SI-NEXT:    v_add_f32_e32 v0, v0, v1
 ; SI-NEXT:    s_waitcnt expcnt(0)
@@ -2225,10 +2235,12 @@ define amdgpu_cs float @cs_main(i32 %idx) {
 ; VI-NEXT:    buffer_load_dword v0, v17, s[4:7], 0 offen
 ; VI-NEXT:    v_mov_b32_e32 v17, 0x3f20e7f4
 ; VI-NEXT:    v_mov_b32_e32 v18, 0x3f3d349c
-; VI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:832
-; VI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:828
-; VI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:824
-; VI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:820
+; VI-NEXT:    v_add_u32_e32 v19, vcc, 0x200, v0
+; VI-NEXT:    buffer_load_dword v0, v0, s[0:3], 0 offen
+; VI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:832
+; VI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:828
+; VI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:824
+; VI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:820
 ; VI-NEXT:    v_mov_b32_e32 v17, 0x3703c499
 ; VI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:796
 ; VI-NEXT:    buffer_store_dword v13, off, s[0:3], 0 offset:792
@@ -2246,21 +2258,21 @@ define amdgpu_cs float @cs_main(i32 %idx) {
 ; VI-NEXT:    buffer_store_dword v16, off, s[0:3], 0 offset:768
 ; VI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:764
 ; VI-NEXT:    v_mov_b32_e32 v5, 0xbf5f2ee2
-; VI-NEXT:    buffer_store_dword v5, off, s[4:7], 0 offset:760
-; VI-NEXT:    buffer_store_dword v4, off, s[4:7], 0 offset:756
-; VI-NEXT:    buffer_store_dword v18, off, s[4:7], 0 offset:752
-; VI-NEXT:    buffer_store_dword v3, off, s[4:7], 0 offset:748
-; VI-NEXT:    buffer_store_dword v13, off, s[4:7], 0 offset:744
-; VI-NEXT:    buffer_store_dword v14, off, s[4:7], 0 offset:740
-; VI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:736
-; VI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:732
-; VI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:728
-; VI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:724
-; VI-NEXT:    buffer_store_dword v8, off, s[4:7], 0 offset:720
-; VI-NEXT:    buffer_store_dword v7, off, s[4:7], 0 offset:716
-; VI-NEXT:    buffer_store_dword v2, off, s[4:7], 0 offset:712
-; VI-NEXT:    buffer_store_dword v12, off, s[4:7], 0 offset:708
-; VI-NEXT:    buffer_load_dword v1, v19, s[4:7], 0 offen
+; VI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:760
+; VI-NEXT:    buffer_store_dword v4, off, s[0:3], 0 offset:756
+; VI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:752
+; VI-NEXT:    buffer_store_dword v3, off, s[0:3], 0 offset:748
+; VI-NEXT:    buffer_store_dword v13, off, s[0:3], 0 offset:744
+; VI-NEXT:    buffer_store_dword v14, off, s[0:3], 0 offset:740
+; VI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:736
+; VI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:732
+; VI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:728
+; VI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:724
+; VI-NEXT:    buffer_store_dword v8, off, s[0:3], 0 offset:720
+; VI-NEXT:    buffer_store_dword v7, off, s[0:3], 0 offset:716
+; VI-NEXT:    buffer_store_dword v2, off, s[0:3], 0 offset:712
+; VI-NEXT:    buffer_store_dword v12, off, s[0:3], 0 offset:708
+; VI-NEXT:    buffer_load_dword v1, v19, s[0:3], 0 offen
 ; VI-NEXT:    s_waitcnt vmcnt(0)
 ; VI-NEXT:    v_add_f32_e32 v0, v0, v1
 ; VI-NEXT:    ; return to shader part epilog
@@ -2655,10 +2667,30 @@ define amdgpu_cs float @cs_main(i32 %idx) {
 ; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v21, v3
 ; GFX9-FLATSCR-NEXT:    scratch_store_dwordx4 off, v[3:6], s0 offset:720
 ; GFX9-FLATSCR-NEXT:    scratch_store_dwordx4 off, v[0:3], s0 offset:832
-; GFX9-FLATSCR-NEXT:    scratch_store_dwordx4 off, v[4:7], s0 offset:752
-; GFX9-FLATSCR-NEXT:    v_add_u32_e32 v1, 0x200, v31
-; GFX9-FLATSCR-NEXT:    scratch_store_dwordx4 off, v[22:25], s0 offset:800
-; GFX9-FLATSCR-NEXT:    scratch_store_dwordx4 off, v[15:18], s0 offset:704
+; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v16, v25
+; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v0, 0xbf523be1
+; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v3, 0x3f3d349c
+; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v1, v24
+; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v2, v11
+; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v9, v6
+; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v10, v13
+; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v29, v22
+; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v30, v27
+; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v31, v23
+; GFX9-FLATSCR-NEXT:    scratch_store_dwordx4 off, v[0:3], s0 offset:784
+; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v18, v12
+; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v2, 0xbf5f2ee2
+; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v3, v23
+; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v20, v17
+; GFX9-FLATSCR-NEXT:    scratch_store_dwordx4 off, v[13:16], s0 offset:736
+; GFX9-FLATSCR-NEXT:    scratch_store_dwordx4 off, v[7:10], s0 offset:816
+; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v13, v19
+; GFX9-FLATSCR-NEXT:    v_mov_b32_e32 v14, v17
+; GFX9-FLATSCR-NEXT:    scratch_store_dwordx4 off, v[28:31], s0 offset:768
+; GFX9-FLATSCR-NEXT:    scratch_store_dwordx4 off, v[0:3], s0 offset:752
+; GFX9-FLATSCR-NEXT:    scratch_store_dwordx4 off, v[18:21], s0 offset:800
+; GFX9-FLATSCR-NEXT:    v_add_u32_e32 v1, 0x200, v26
+; GFX9-FLATSCR-NEXT:    scratch_store_dwordx4 off, v[11:14], s0 offset:704
 ; GFX9-FLATSCR-NEXT:    scratch_load_dword v0, v1, off
 ; GFX9-FLATSCR-NEXT:    s_waitcnt vmcnt(0)
 ; GFX9-FLATSCR-NEXT:    v_add_f32_e32 v0, v32, v0
@@ -2812,10 +2844,30 @@ define amdgpu_cs float @cs_main(i32 %idx) {
 ; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v21, v3
 ; GFX9-FLATSCR-PAL-NEXT:    scratch_store_dwordx4 off, v[3:6], s0 offset:720
 ; GFX9-FLATSCR-PAL-NEXT:    scratch_store_dwordx4 off, v[0:3], s0 offset:832
-; GFX9-FLATSCR-PAL-NEXT:    scratch_store_dwordx4 off, v[4:7], s0 offset:752
-; GFX9-FLATSCR-PAL-NEXT:    v_add_u32_e32 v1, 0x200, v31
-; GFX9-FLATSCR-PAL-NEXT:    scratch_store_dwordx4 off, v[22:25], s0 offset:800
-; GFX9-FLATSCR-PAL-NEXT:    scratch_store_dwordx4 off, v[15:18], s0 offset:704
+; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v16, v25
+; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v0, 0xbf523be1
+; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v3, 0x3f3d349c
+; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v1, v24
+; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v2, v11
+; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v9, v6
+; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v10, v13
+; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v29, v22
+; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v30, v27
+; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v31, v23
+; GFX9-FLATSCR-PAL-NEXT:    scratch_store_dwordx4 off, v[0:3], s0 offset:784
+; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v18, v12
+; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v2, 0xbf5f2ee2
+; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v3, v23
+; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v20, v17
+; GFX9-FLATSCR-PAL-NEXT:    scratch_store_dwordx4 off, v[13:16], s0 offset:736
+; GFX9-FLATSCR-PAL-NEXT:    scratch_store_dwordx4 off, v[7:10], s0 offset:816
+; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v13, v19
+; GFX9-FLATSCR-PAL-NEXT:    v_mov_b32_e32 v14, v17
+; GFX9-FLATSCR-PAL-NEXT:    scratch_store_dwordx4 off, v[28:31], s0 offset:768
+; GFX9-FLATSCR-PAL-NEXT:    scratch_store_dwordx4 off, v[0:3], s0 offset:752
+; GFX9-FLATSCR-PAL-NEXT:    scratch_store_dwordx4 off, v[18:21], s0 offset:800
+; GFX9-FLATSCR-PAL-NEXT:    v_add_u32_e32 v1, 0x200, v26
+; GFX9-FLATSCR-PAL-NEXT:    scratch_store_dwordx4 off, v[11:14], s0 offset:704
 ; GFX9-FLATSCR-PAL-NEXT:    scratch_load_dword v0, v1, off
 ; GFX9-FLATSCR-PAL-NEXT:    s_waitcnt vmcnt(0)
 ; GFX9-FLATSCR-PAL-NEXT:    v_add_f32_e32 v0, v32, v0
@@ -3075,10 +3127,12 @@ define amdgpu_hs float @hs_main(i32 %idx) {
 ; SI-NEXT:    buffer_load_dword v0, v17, s[4:7], 0 offen
 ; SI-NEXT:    v_mov_b32_e32 v17, 0x3f20e7f4
 ; SI-NEXT:    v_mov_b32_e32 v18, 0x3f3d349c
-; SI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:832
-; SI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:828
-; SI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:824
-; SI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:820
+; SI-NEXT:    v_add_i32_e32 v19, vcc, 0x200, v0
+; SI-NEXT:    buffer_load_dword v0, v0, s[0:3], 0 offen
+; SI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:832
+; SI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:828
+; SI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:824
+; SI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:820
 ; SI-NEXT:    s_waitcnt expcnt(3)
 ; SI-NEXT:    v_mov_b32_e32 v17, 0x3703c499
 ; SI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:796
@@ -3099,21 +3153,21 @@ define amdgpu_hs float @hs_main(i32 %idx) {
 ; SI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:764
 ; SI-NEXT:    s_waitcnt expcnt(0)
 ; SI-NEXT:    v_mov_b32_e32 v5, 0xbf5f2ee2
-; SI-NEXT:    buffer_store_dword v5, off, s[4:7], 0 offset:760
-; SI-NEXT:    buffer_store_dword v4, off, s[4:7], 0 offset:756
-; SI-NEXT:    buffer_store_dword v18, off, s[4:7], 0 offset:752
-; SI-NEXT:    buffer_store_dword v3, off, s[4:7], 0 offset:748
-; SI-NEXT:    buffer_store_dword v13, off, s[4:7], 0 offset:744
-; SI-NEXT:    buffer_store_dword v14, off, s[4:7], 0 offset:740
-; SI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:736
-; SI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:732
-; SI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:728
-; SI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:724
-; SI-NEXT:    buffer_store_dword v8, off, s[4:7], 0 offset:720
-; SI-NEXT:    buffer_store_dword v7, off, s[4:7], 0 offset:716
-; SI-NEXT:    buffer_store_dword v2, off, s[4:7], 0 offset:712
-; SI-NEXT:    buffer_store_dword v12, off, s[4:7], 0 offset:708
-; SI-NEXT:    buffer_load_dword v1, v19, s[4:7], 0 offen
+; SI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:760
+; SI-NEXT:    buffer_store_dword v4, off, s[0:3], 0 offset:756
+; SI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:752
+; SI-NEXT:    buffer_store_dword v3, off, s[0:3], 0 offset:748
+; SI-NEXT:    buffer_store_dword v13, off, s[0:3], 0 offset:744
+; SI-NEXT:    buffer_store_dword v14, off, s[0:3], 0 offset:740
+; SI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:736
+; SI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:732
+; SI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:728
+; SI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:724
+; SI-NEXT:    buffer_store_dword v8, off, s[0:3], 0 offset:720
+; SI-NEXT:    buffer_store_dword v7, off, s[0:3], 0 offset:716
+; SI-NEXT:    buffer_store_dword v2, off, s[0:3], 0 offset:712
+; SI-NEXT:    buffer_store_dword v12, off, s[0:3], 0 offset:708
+; SI-NEXT:    buffer_load_dword v1, v19, s[0:3], 0 offen
 ; SI-NEXT:    s_waitcnt vmcnt(0)
 ; SI-NEXT:    v_add_f32_e32 v0, v0, v1
 ; SI-NEXT:    s_waitcnt expcnt(0)
@@ -3190,10 +3244,12 @@ define amdgpu_hs float @hs_main(i32 %idx) {
 ; VI-NEXT:    buffer_load_dword v0, v17, s[4:7], 0 offen
 ; VI-NEXT:    v_mov_b32_e32 v17, 0x3f20e7f4
 ; VI-NEXT:    v_mov_b32_e32 v18, 0x3f3d349c
-; VI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:832
-; VI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:828
-; VI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:824
-; VI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:820
+; VI-NEXT:    v_add_u32_e32 v19, vcc, 0x200, v0
+; VI-NEXT:    buffer_load_dword v0, v0, s[0:3], 0 offen
+; VI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:832
+; VI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:828
+; VI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:824
+; VI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:820
 ; VI-NEXT:    v_mov_b32_e32 v17, 0x3703c499
 ; VI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:796
 ; VI-NEXT:    buffer_store_dword v13, off, s[0:3], 0 offset:792
@@ -3211,21 +3267,21 @@ define amdgpu_hs float @hs_main(i32 %idx) {
 ; VI-NEXT:    buffer_store_dword v16, off, s[0:3], 0 offset:768
 ; VI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:764
 ; VI-NEXT:    v_mov_b32_e32 v5, 0xbf5f2ee2
-; VI-NEXT:    buffer_store_dword v5, off, s[4:7], 0 offset:760
-; VI-NEXT:    buffer_store_dword v4, off, s[4:7], 0 offset:756
-; VI-NEXT:    buffer_store_dword v18, off, s[4:7], 0 offset:752
-; VI-NEXT:    buffer_store_dword v3, off, s[4:7], 0 offset:748
-; VI-NEXT:    buffer_store_dword v13, off, s[4:7], 0 offset:744
-; VI-NEXT:    buffer_store_dword v14, off, s[4:7], 0 offset:740
-; VI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:736
-; VI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:732
-; VI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:728
-; VI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:724
-; VI-NEXT:    buffer_store_dword v8, off, s[4:7], 0 offset:720
-; VI-NEXT:    buffer_store_dword v7, off, s[4:7], 0 offset:716
-; VI-NEXT:    buffer_store_dword v2, off, s[4:7], 0 offset:712
-; VI-NEXT:    buffer_store_dword v12, off, s[4:7], 0 offset:708
-; VI-NEXT:    buffer_load_dword v1, v19, s[4:7], 0 offen
+; VI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:760
+; VI-NEXT:    buffer_store_dword v4, off, s[0:3], 0 offset:756
+; VI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:752
+; VI-NEXT:    buffer_store_dword v3, off, s[0:3], 0 offset:748
+; VI-NEXT:    buffer_store_dword v13, off, s[0:3], 0 offset:744
+; VI-NEXT:    buffer_store_dword v14, off, s[0:3], 0 offset:740
+; VI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:736
+; VI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:732
+; VI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:728
+; VI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:724
+; VI-NEXT:    buffer_store_dword v8, off, s[0:3], 0 offset:720
+; VI-NEXT:    buffer_store_dword v7, off, s[0:3], 0 offset:716
+; VI-NEXT:    buffer_store_dword v2, off, s[0:3], 0 offset:712
+; VI-NEXT:    buffer_store_dword v12, off, s[0:3], 0 offset:708
+; VI-NEXT:    buffer_load_dword v1, v19, s[0:3], 0 offen
 ; VI-NEXT:    s_waitcnt vmcnt(0)
 ; VI-NEXT:    v_add_f32_e32 v0, v0, v1
 ; VI-NEXT:    ; return to shader part epilog
@@ -4077,10 +4133,12 @@ define amdgpu_gs float @gs_main(i32 %idx) {
 ; SI-NEXT:    buffer_load_dword v0, v17, s[4:7], 0 offen
 ; SI-NEXT:    v_mov_b32_e32 v17, 0x3f20e7f4
 ; SI-NEXT:    v_mov_b32_e32 v18, 0x3f3d349c
-; SI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:832
-; SI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:828
-; SI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:824
-; SI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:820
+; SI-NEXT:    v_add_i32_e32 v19, vcc, 0x200, v0
+; SI-NEXT:    buffer_load_dword v0, v0, s[0:3], 0 offen
+; SI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:832
+; SI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:828
+; SI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:824
+; SI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:820
 ; SI-NEXT:    s_waitcnt expcnt(3)
 ; SI-NEXT:    v_mov_b32_e32 v17, 0x3703c499
 ; SI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:796
@@ -4101,21 +4159,21 @@ define amdgpu_gs float @gs_main(i32 %idx) {
 ; SI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:764
 ; SI-NEXT:    s_waitcnt expcnt(0)
 ; SI-NEXT:    v_mov_b32_e32 v5, 0xbf5f2ee2
-; SI-NEXT:    buffer_store_dword v5, off, s[4:7], 0 offset:760
-; SI-NEXT:    buffer_store_dword v4, off, s[4:7], 0 offset:756
-; SI-NEXT:    buffer_store_dword v18, off, s[4:7], 0 offset:752
-; SI-NEXT:    buffer_store_dword v3, off, s[4:7], 0 offset:748
-; SI-NEXT:    buffer_store_dword v13, off, s[4:7], 0 offset:744
-; SI-NEXT:    buffer_store_dword v14, off, s[4:7], 0 offset:740
-; SI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:736
-; SI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:732
-; SI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:728
-; SI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:724
-; SI-NEXT:    buffer_store_dword v8, off, s[4:7], 0 offset:720
-; SI-NEXT:    buffer_store_dword v7, off, s[4:7], 0 offset:716
-; SI-NEXT:    buffer_store_dword v2, off, s[4:7], 0 offset:712
-; SI-NEXT:    buffer_store_dword v12, off, s[4:7], 0 offset:708
-; SI-NEXT:    buffer_load_dword v1, v19, s[4:7], 0 offen
+; SI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:760
+; SI-NEXT:    buffer_store_dword v4, off, s[0:3], 0 offset:756
+; SI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:752
+; SI-NEXT:    buffer_store_dword v3, off, s[0:3], 0 offset:748
+; SI-NEXT:    buffer_store_dword v13, off, s[0:3], 0 offset:744
+; SI-NEXT:    buffer_store_dword v14, off, s[0:3], 0 offset:740
+; SI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:736
+; SI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:732
+; SI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:728
+; SI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:724
+; SI-NEXT:    buffer_store_dword v8, off, s[0:3], 0 offset:720
+; SI-NEXT:    buffer_store_dword v7, off, s[0:3], 0 offset:716
+; SI-NEXT:    buffer_store_dword v2, off, s[0:3], 0 offset:712
+; SI-NEXT:    buffer_store_dword v12, off, s[0:3], 0 offset:708
+; SI-NEXT:    buffer_load_dword v1, v19, s[0:3], 0 offen
 ; SI-NEXT:    s_waitcnt vmcnt(0)
 ; SI-NEXT:    v_add_f32_e32 v0, v0, v1
 ; SI-NEXT:    s_waitcnt expcnt(0)
@@ -4192,10 +4250,12 @@ define amdgpu_gs float @gs_main(i32 %idx) {
 ; VI-NEXT:    buffer_load_dword v0, v17, s[4:7], 0 offen
 ; VI-NEXT:    v_mov_b32_e32 v17, 0x3f20e7f4
 ; VI-NEXT:    v_mov_b32_e32 v18, 0x3f3d349c
-; VI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:832
-; VI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:828
-; VI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:824
-; VI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:820
+; VI-NEXT:    v_add_u32_e32 v19, vcc, 0x200, v0
+; VI-NEXT:    buffer_load_dword v0, v0, s[0:3], 0 offen
+; VI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:832
+; VI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:828
+; VI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:824
+; VI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:820
 ; VI-NEXT:    v_mov_b32_e32 v17, 0x3703c499
 ; VI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:796
 ; VI-NEXT:    buffer_store_dword v13, off, s[0:3], 0 offset:792
@@ -4213,21 +4273,21 @@ define amdgpu_gs float @gs_main(i32 %idx) {
 ; VI-NEXT:    buffer_store_dword v16, off, s[0:3], 0 offset:768
 ; VI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:764
 ; VI-NEXT:    v_mov_b32_e32 v5, 0xbf5f2ee2
-; VI-NEXT:    buffer_store_dword v5, off, s[4:7], 0 offset:760
-; VI-NEXT:    buffer_store_dword v4, off, s[4:7], 0 offset:756
-; VI-NEXT:    buffer_store_dword v18, off, s[4:7], 0 offset:752
-; VI-NEXT:    buffer_store_dword v3, off, s[4:7], 0 offset:748
-; VI-NEXT:    buffer_store_dword v13, off, s[4:7], 0 offset:744
-; VI-NEXT:    buffer_store_dword v14, off, s[4:7], 0 offset:740
-; VI-NEXT:    buffer_store_dword v11, off, s[4:7], 0 offset:736
-; VI-NEXT:    buffer_store_dword v10, off, s[4:7], 0 offset:732
-; VI-NEXT:    buffer_store_dword v9, off, s[4:7], 0 offset:728
-; VI-NEXT:    buffer_store_dword v17, off, s[4:7], 0 offset:724
-; VI-NEXT:    buffer_store_dword v8, off, s[4:7], 0 offset:720
-; VI-NEXT:    buffer_store_dword v7, off, s[4:7], 0 offset:716
-; VI-NEXT:    buffer_store_dword v2, off, s[4:7], 0 offset:712
-; VI-NEXT:    buffer_store_dword v12, off, s[4:7], 0 offset:708
-; VI-NEXT:    buffer_load_dword v1, v19, s[4:7], 0 offen
+; VI-NEXT:    buffer_store_dword v5, off, s[0:3], 0 offset:760
+; VI-NEXT:    buffer_store_dword v4, off, s[0:3], 0 offset:756
+; VI-NEXT:    buffer_store_dword v18, off, s[0:3], 0 offset:752
+; VI-NEXT:    buffer_store_dword v3, off, s[0:3], 0 offset:748
+; VI-NEXT:    buffer_store_dword v13, off, s[0:3], 0 offset:744
+; VI-NEXT:    buffer_store_dword v14, off, s[0:3], 0 offset:740
+; VI-NEXT:    buffer_store_dword v11, off, s[0:3], 0 offset:736
+; VI-NEXT:    buffer_store_dword v10, off, s[0:3], 0 offset:732
+; VI-NEXT:    buffer_store_dword v9, off, s[0:3], 0 offset:728
+; VI-NEXT:    buffer_store_dword v17, off, s[0:3], 0 offset:724
+; VI-NEXT:    buffer_store_dword v8, off, s[0:3], 0 offset:720
+; VI-NEXT:    buffer_store_dword v7, off, s[0:3], 0 offset:716
+; VI-NEXT:    buffer_store_dword v2, off, s[0:3], 0 offset:712
+; VI-NEXT:    buffer_store_dword v12, off, s[0:3], 0 offset:708
+; VI-NEXT:    buffer_load_dword v1, v19, s[0:3], 0 offen
 ; VI-NEXT:    s_waitcnt vmcnt(0)
 ; VI-NEXT:    v_add_f32_e32 v0, v0, v1
 ; VI-NEXT:    ; return to shader part epilog
@@ -5082,6 +5142,8 @@ define amdgpu_hs <{i32, i32, i32, float}> @hs_ir_uses_scratch_offset(i32 inreg, 
 ; SI-NEXT:    buffer_load_dword v0, v17, s[8:11], 0 offen
 ; SI-NEXT:    v_mov_b32_e32 v17, 0x3f20e7f4
 ; SI-NEXT:    v_mov_b32_e32 v18, 0x3f3d349c
+; SI-NEXT:    v_add_i32_e32 v19, vcc, 0x200, v0
+; SI-NEXT:    buffer_load_dword v0, v0, s[8:11], 0 offen
 ; SI-NEXT:    buffer_store_dword v17, off, s[8:11], 0 offset:832
 ; SI-NEXT:    buffer_store_dword v11, off, s[8:11], 0 offset:828
 ; SI-NEXT:    buffer_store_dword v10, off, s[8:11], 0 offset:824
@@ -5197,6 +5259,8 @@ define amdgpu_hs <{i32, i32, i32, float}> @hs_ir_uses_scratch_offset(i32 inreg, 
 ; VI-NEXT:    buffer_load_dword v0, v17, s[8:11], 0 offen
 ; VI-NEXT:    v_mov_b32_e32 v17, 0x3f20e7f4
 ; VI-NEXT:    v_mov_b32_e32 v18, 0x3f3d349c
+; VI-NEXT:    v_add_u32_e32 v19, vcc, 0x200, v0
+; VI-NEXT:    buffer_load_dword v0, v0, s[8:11], 0 offen
 ; VI-NEXT:    buffer_store_dword v17, off, s[8:11], 0 offset:832
 ; VI-NEXT:    buffer_store_dword v11, off, s[8:11], 0 offset:828
 ; VI-NEXT:    buffer_store_dword v10, off, s[8:11], 0 offset:824
@@ -6093,6 +6157,8 @@ define amdgpu_gs <{i32, i32, i32, float}> @gs_ir_uses_scratch_offset(i32 inreg, 
 ; SI-NEXT:    buffer_load_dword v0, v17, s[8:11], 0 offen
 ; SI-NEXT:    v_mov_b32_e32 v17, 0x3f20e7f4
 ; SI-NEXT:    v_mov_b32_e32 v18, 0x3f3d349c
+; SI-NEXT:    v_add_i32_e32 v19, vcc, 0x200, v0
+; SI-NEXT:    buffer_load_dword v0, v0, s[8:11], 0 offen
 ; SI-NEXT:    buffer_store_dword v17, off, s[8:11], 0 offset:832
 ; SI-NEXT:    buffer_store_dword v11, off, s[8:11], 0 offset:828
 ; SI-NEXT:    buffer_store_dword v10, off, s[8:11], 0 offset:824
@@ -6208,6 +6274,8 @@ define amdgpu_gs <{i32, i32, i32, float}> @gs_ir_uses_scratch_offset(i32 inreg, 
 ; VI-NEXT:    buffer_load_dword v0, v17, s[8:11], 0 offen
 ; VI-NEXT:    v_mov_b32_e32 v17, 0x3f20e7f4
 ; VI-NEXT:    v_mov_b32_e32 v18, 0x3f3d349c
+; VI-NEXT:    v_add_u32_e32 v19, vcc, 0x200, v0
+; VI-NEXT:    buffer_load_dword v0, v0, s[8:11], 0 offen
 ; VI-NEXT:    buffer_store_dword v17, off, s[8:11], 0 offset:832
 ; VI-NEXT:    buffer_store_dword v11, off, s[8:11], 0 offset:828
 ; VI-NEXT:    buffer_store_dword v10, off, s[8:11], 0 offset:824

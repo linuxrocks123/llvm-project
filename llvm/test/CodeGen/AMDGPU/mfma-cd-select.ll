@@ -437,6 +437,7 @@ define amdgpu_kernel void @test_mfma_f32_32x32x1f32_inline_asm_phys_agpr(ptr add
 ; GFX908-NEXT:    v_accvgpr_read_b32 v16, a11
 ; GFX908-NEXT:    v_accvgpr_read_b32 v20, a15
 ; GFX908-NEXT:    v_accvgpr_read_b32 v24, a3
+; GFX908-NEXT:    global_store_dwordx4 v40, v[4:7], s[0:1] offset:96
 ; GFX908-NEXT:    v_accvgpr_read_b32 v28, a7
 ; GFX908-NEXT:    v_accvgpr_read_b32 v7, a18
 ; GFX908-NEXT:    v_accvgpr_read_b32 v6, a17
@@ -456,7 +457,7 @@ define amdgpu_kernel void @test_mfma_f32_32x32x1f32_inline_asm_phys_agpr(ptr add
 ; GFX908-NEXT:    v_accvgpr_read_b32 v27, a6
 ; GFX908-NEXT:    v_accvgpr_read_b32 v26, a5
 ; GFX908-NEXT:    v_accvgpr_read_b32 v25, a4
-; GFX908-NEXT:    global_store_dwordx4 v40, v[1:4], s[0:1] offset:112
+; GFX908-NEXT:    global_store_dwordx4 v40, v[0:3], s[0:1] offset:112
 ; GFX908-NEXT:    global_store_dwordx4 v40, v[5:8], s[0:1] offset:64
 ; GFX908-NEXT:    global_store_dwordx4 v40, v[9:12], s[0:1] offset:80
 ; GFX908-NEXT:    global_store_dwordx4 v40, v[13:16], s[0:1] offset:32

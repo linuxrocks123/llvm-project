@@ -400,14 +400,14 @@ define hidden amdgpu_kernel void @clmem_read(ptr addrspace(1)  %buffer) {
 ; GFX8-NEXT:    v_addc_u32_e32 v9, vcc, -1, v3, vcc
 ; GFX8-NEXT:    flat_load_dwordx2 v[4:5], v[2:3]
 ; GFX8-NEXT:    flat_load_dwordx2 v[14:15], v[8:9]
-; GFX8-NEXT:    v_add_u32_e32 v22, vcc, 0xffffe000, v2
-; GFX8-NEXT:    v_addc_u32_e32 v23, vcc, -1, v3, vcc
-; GFX8-NEXT:    flat_load_dwordx2 v[12:13], v[22:23]
+; GFX8-NEXT:    v_add_u32_e32 v10, vcc, 0xffffe000, v2
+; GFX8-NEXT:    v_addc_u32_e32 v11, vcc, -1, v3, vcc
+; GFX8-NEXT:    flat_load_dwordx2 v[16:17], v[10:11]
 ; GFX8-NEXT:    v_add_u32_e32 v24, vcc, 0xffffe800, v2
 ; GFX8-NEXT:    v_addc_u32_e32 v25, vcc, -1, v3, vcc
 ; GFX8-NEXT:    flat_load_dwordx2 v[18:19], v[24:25]
-; GFX8-NEXT:    v_add_u32_e32 v16, vcc, 0xfffff000, v2
-; GFX8-NEXT:    v_addc_u32_e32 v17, vcc, -1, v3, vcc
+; GFX8-NEXT:    v_add_u32_e32 v10, vcc, 0xfffff000, v2
+; GFX8-NEXT:    v_addc_u32_e32 v11, vcc, -1, v3, vcc
 ; GFX8-NEXT:    v_add_u32_e32 v20, vcc, 0xfffff800, v2
 ; GFX8-NEXT:    v_addc_u32_e32 v21, vcc, -1, v3, vcc
 ; GFX8-NEXT:    v_add_u32_e32 v26, vcc, s1, v2
@@ -416,21 +416,26 @@ define hidden amdgpu_kernel void @clmem_read(ptr addrspace(1)  %buffer) {
 ; GFX8-NEXT:    s_addk_i32 s5, 0x2000
 ; GFX8-NEXT:    s_cmp_gt_u32 s5, 0x3fffff
 ; GFX8-NEXT:    s_waitcnt vmcnt(3)
-; GFX8-NEXT:    v_add_u32_e32 v22, vcc, v14, v6
-; GFX8-NEXT:    v_addc_u32_e32 v23, vcc, v15, v7, vcc
-; GFX8-NEXT:    v_add_u32_e32 v28, vcc, s2, v2
+; GFX8-NEXT:    v_add_u32_e32 v24, vcc, v14, v6
+; GFX8-NEXT:    v_addc_u32_e32 v25, vcc, v15, v7, vcc
+; GFX8-NEXT:    v_add_u32_e32 v26, vcc, s2, v2
+; GFX8-NEXT:    flat_load_dwordx2 v[10:11], v[20:21]
+; GFX8-NEXT:    flat_load_dwordx2 v[6:7], v[22:23]
+; GFX8-NEXT:    v_addc_u32_e32 v27, vcc, 0, v3, vcc
+; GFX8-NEXT:    v_add_u32_e32 v28, vcc, s3, v2
 ; GFX8-NEXT:    v_addc_u32_e32 v29, vcc, 0, v3, vcc
-; GFX8-NEXT:    v_add_u32_e32 v30, vcc, s3, v2
+; GFX8-NEXT:    s_waitcnt vmcnt(4)
+; GFX8-NEXT:    v_add_u32_e32 v22, vcc, v16, v24
+; GFX8-NEXT:    v_addc_u32_e32 v23, vcc, v17, v25, vcc
+; GFX8-NEXT:    v_add_u32_e32 v30, vcc, s4, v2
+; GFX8-NEXT:    flat_load_dwordx2 v[14:15], v[26:27]
+; GFX8-NEXT:    flat_load_dwordx2 v[20:21], v[28:29]
 ; GFX8-NEXT:    v_addc_u32_e32 v31, vcc, 0, v3, vcc
-; GFX8-NEXT:    s_waitcnt vmcnt(2)
-; GFX8-NEXT:    v_add_u32_e32 v22, vcc, v12, v22
-; GFX8-NEXT:    v_addc_u32_e32 v23, vcc, v13, v23, vcc
-; GFX8-NEXT:    v_add_u32_e32 v12, vcc, s4, v2
-; GFX8-NEXT:    v_addc_u32_e32 v13, vcc, 0, v3, vcc
-; GFX8-NEXT:    s_waitcnt vmcnt(1)
+; GFX8-NEXT:    s_waitcnt vmcnt(5)
 ; GFX8-NEXT:    v_add_u32_e32 v22, vcc, v18, v22
 ; GFX8-NEXT:    v_addc_u32_e32 v23, vcc, v19, v23, vcc
 ; GFX8-NEXT:    v_add_u32_e32 v18, vcc, s0, v2
+; GFX8-NEXT:    flat_load_dwordx2 v[16:17], v[30:31]
 ; GFX8-NEXT:    v_addc_u32_e32 v19, vcc, 0, v3, vcc
 ; GFX8-NEXT:    flat_load_dwordx2 v[18:19], v[18:19]
 ; GFX8-NEXT:    flat_load_dwordx2 v[12:13], v[12:13]
@@ -754,13 +759,13 @@ define hidden amdgpu_kernel void @clmem_read(ptr addrspace(1)  %buffer) {
 ; GFX90A-NEXT:    global_load_dwordx2 v[30:31], v[34:35], off
 ; GFX90A-NEXT:    v_add_co_u32_e32 v22, vcc, s2, v4
 ; GFX90A-NEXT:    v_addc_co_u32_e32 v23, vcc, -1, v5, vcc
-; GFX90A-NEXT:    global_load_dwordx2 v[8:9], v[22:23], off offset:-2048
+; GFX90A-NEXT:    global_load_dwordx2 v[14:15], v[22:23], off offset:-2048
 ; GFX90A-NEXT:    global_load_dwordx2 v[18:19], v[36:37], off offset:2048
 ; GFX90A-NEXT:    global_load_dwordx2 v[20:21], v[32:33], off offset:2048
-; GFX90A-NEXT:    global_load_dwordx2 v[10:11], v[4:5], off offset:-4096
-; GFX90A-NEXT:    global_load_dwordx2 v[12:13], v[4:5], off offset:-2048
-; GFX90A-NEXT:    global_load_dwordx2 v[14:15], v[4:5], off
-; GFX90A-NEXT:    global_load_dwordx2 v[16:17], v[4:5], off offset:2048
+; GFX90A-NEXT:    global_load_dwordx2 v[6:7], v[4:5], off offset:-4096
+; GFX90A-NEXT:    global_load_dwordx2 v[8:9], v[4:5], off offset:-2048
+; GFX90A-NEXT:    global_load_dwordx2 v[10:11], v[4:5], off
+; GFX90A-NEXT:    global_load_dwordx2 v[12:13], v[4:5], off offset:2048
 ; GFX90A-NEXT:    v_add_co_u32_e32 v4, vcc, 0x10000, v4
 ; GFX90A-NEXT:    v_addc_co_u32_e32 v5, vcc, 0, v5, vcc
 ; GFX90A-NEXT:    s_addk_i32 s5, 0x2000

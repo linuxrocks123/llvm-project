@@ -504,7 +504,7 @@ define amdgpu_kernel void @global_load_v11f32(ptr addrspace(1) %out, ptr addrspa
 ; SI-NOHSA-NEXT:    buffer_store_dword v2, off, s[0:3], 0 offset:40
 ; SI-NOHSA-NEXT:    buffer_store_dwordx2 v[0:1], off, s[0:3], 0 offset:32
 ; SI-NOHSA-NEXT:    s_waitcnt vmcnt(3)
-; SI-NOHSA-NEXT:    buffer_store_dwordx4 v[11:14], off, s[4:7], 0
+; SI-NOHSA-NEXT:    buffer_store_dwordx4 v[11:14], off, s[0:3], 0
 ; SI-NOHSA-NEXT:    s_waitcnt vmcnt(3)
 ; SI-NOHSA-NEXT:    buffer_store_dwordx4 v[7:10], off, s[0:3], 0 offset:16
 ; SI-NOHSA-NEXT:    s_endpgm
